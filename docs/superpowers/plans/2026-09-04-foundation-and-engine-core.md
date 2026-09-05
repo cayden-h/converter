@@ -1074,7 +1074,8 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export class JobRunner extends EventEmitter {
   constructor(
     private readonly registry: Registry,
-    private readonly options: JobRunnerOptions,
+    /** Public and replaceable so tests can redirect output without reaching into privates. */
+    public options: JobRunnerOptions,
   ) {
     super();
   }
@@ -1667,8 +1668,10 @@ describe.skipIf(!magick)("real conversion", () => {
   test("converts png to jpg and writes a valid JPEG", async () => {
     const input = ensurePngFixture(magick!);
     const engineForTest = createEngine("/nonexistent-bundle-dir");
-    (engineForTest.runner as unknown as { options: { outputDirFor: () => string } }).options
-      .outputDirFor = () => outDir;
+    engineForTest.runner.options = {
+      ...engineForTest.runner.options,
+      outputDirFor: () => outDir,
+    };
 
     const results = await engineForTest.runner.run([{ path: input, output: "jpg" }]);
 
@@ -1690,51 +1693,25 @@ describe.skipIf(!magick)("real conversion", () => {
 });
 ```
 
-- [ ] **Step 3: Make `outputDirFor` configurable rather than reaching into privates**
-
-The test above pokes at a private field, which is a smell. Fix it properly by making the runner options public and mutable.
-
-In `src/main/engine/job.ts`, change the constructor signature so options are readable and replaceable:
-
-```ts
-export class JobRunner extends EventEmitter {
-  constructor(
-    private readonly registry: Registry,
-    public options: JobRunnerOptions,
-  ) {
-    super();
-  }
-```
-
-Then simplify the test's setup line to:
-
-```ts
-    const engineForTest = createEngine("/nonexistent-bundle-dir");
-    engineForTest.runner.options = {
-      ...engineForTest.runner.options,
-      outputDirFor: () => outDir,
-    };
-```
-
-- [ ] **Step 4: Run the integration test**
+- [ ] **Step 3: Run the integration test**
 
 Run: `npx vitest run tests/integration/convert.test.ts`
 Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather than fails.
 
-- [ ] **Step 5: Run the whole suite**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 32 tests across 6 files.
+Expected: all suites pass. Total should be 38 tests across 7 files: toolchain 6, exec 4, imagemagick 6, registry 8, job 6, offline 6, integration 2.
 
-- [ ] **Step 6: Verify typecheck still passes**
+- [ ] **Step 5: Verify typecheck still passes**
 
 Run: `npx tsc --noEmit`
 Expected: exits 0.
 
-- [ ] **Step 7: Commit and push**
+- [ ] **Step 6: Commit and push**
 
 ```bash
-git add tests/integration tests/fixtures src/main/engine/job.ts
+git add tests/integration tests/fixtures
 git commit -m "test: add real png to jpg integration test"
 git push origin main
 ```
