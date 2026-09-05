@@ -2,6 +2,8 @@ export interface ToolStatus {
   name: string;
   available: boolean;
   path?: string;
+  /** Copyable command to install this tool when missing, e.g. "brew install ffmpeg". */
+  installHint?: string;
 }
 
 export interface ConvertRequest {

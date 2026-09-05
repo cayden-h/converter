@@ -3,6 +3,7 @@ import type { FormatGroup, ProgressUpdate, ToolStatus } from "../shared/ipc";
 import { DropZone } from "./components/DropZone";
 import { FileRow } from "./components/FileRow";
 import { FormatPicker } from "./components/FormatPicker";
+import { FormatsPanel } from "./components/FormatsPanel";
 import { ResultRow, type RowStatus } from "./components/ResultRow";
 import { computeFormatAvailability } from "./formatAvailability";
 import { useFiles } from "./useFiles";
@@ -176,16 +177,7 @@ export function App() {
         </section>
       )}
 
-      <details className="mt-auto text-sm text-muted">
-        <summary>Formats</summary>
-        <ul>
-          {tools.map((tool) => (
-            <li key={tool.name}>
-              {tool.name}: {tool.available ? tool.path : "not installed"}
-            </li>
-          ))}
-        </ul>
-      </details>
+      <FormatsPanel tools={tools} />
     </main>
   );
 }

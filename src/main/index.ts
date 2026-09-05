@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createEngine } from "./engine";
 import { enforceOffline } from "./offline";
 import { forwardProgress } from "./progress";
-import { KNOWN_TOOLS, type ToolName } from "./engine/toolchain";
+import { buildToolStatuses } from "./formatsPanel";
 import { IPC, type ConvertRequest } from "../shared/ipc";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,13 +42,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   enforceOffline(session.defaultSession);
 
-  ipcMain.handle(IPC.detectTools, () =>
-    (Object.keys(KNOWN_TOOLS) as ToolName[]).map((name) => ({
-      name,
-      available: Boolean(engine.toolchain[name]),
-      path: engine.toolchain[name],
-    })),
-  );
+  ipcMain.handle(IPC.detectTools, () => buildToolStatuses(engine.toolchain));
 
   ipcMain.handle(IPC.outputsFor, (_event, extension: string) =>
     engine.registry.outputsFor(extension),
