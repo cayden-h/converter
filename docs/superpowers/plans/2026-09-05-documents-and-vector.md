@@ -560,6 +560,159 @@ git commit -m "feat: add a PDF writer using electron's own chromium"
 
 ---
 
+### Task 4b: Teach the toolchain about the new tools, and let a converter need more than one
+
+Task 5 was attempted and correctly reported BLOCKED. Two gaps, both mine:
+
+**1. `ToolName` does not include the new tools.** It is `"imagemagick" | "ffmpeg" | "ffprobe" | "poppler" | "pandoc"`. `resvg`, `dasel` and `potrace` are absent, and `toCommandMap` builds the `CommandMap` the runner uses solely from `KNOWN_TOOLS` keys.
+
+Registering those three with a borrowed `tool` value would let `buildRegistry` treat them as available and advertise `svg -> png`, `png -> svg` and `csv -> json` in the picker - and every one would fail at runtime with `Tool not available: resvg`, because `createExecFile` does a hard map lookup with no PATH fallback. A format offered that cannot work is worse than one absent.
+
+**2. A converter can need more than one tool.** `rasterTrace` invokes ImageMagick AND potrace. `ConverterEntry.tool` holds a single name, so declaring either one alone would offer the conversion when the other is missing. Make the dependency plural and honest.
+
+**Files:**
+- Modify: `src/main/engine/toolchain.ts`
+- Modify: `src/main/engine/registry.ts`
+- Modify: `src/main/engine/index.ts`
+- Modify: `tests/engine/toolchain.test.ts`, `tests/engine/registry.test.ts`
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/engine/registry.test.ts`:
+
+```ts
+  test("a converter needing two tools is offered only when both resolve", () => {
+    // rasterTrace shells out to magick AND potrace. Declaring one dependency
+    // would advertise png -> svg while the other tool is missing, and the
+    // conversion would fail at runtime with "Tool not available".
+    const composite = {
+      tools: ["imagemagick", "potrace"] as const,
+      priority: 25,
+      properties: { from: { images: ["png"] }, to: { images: ["svg"] } },
+      convert: async () => "Done",
+    };
+    const both = buildRegistry(
+      { rasterTrace: composite },
+      { imagemagick: "/bin/magick", potrace: "/bin/potrace" },
+    );
+    expect(both.converterFor("png", "svg")?.name).toBe("rasterTrace");
+
+    const onlyOne = buildRegistry({ rasterTrace: composite }, { imagemagick: "/bin/magick" });
+    expect(onlyOne.converterFor("png", "svg"), "must not offer with potrace missing").toBeNull();
+    expect(onlyOne.missingTools()).toContain("potrace");
+  });
+```
+
+Add to `tests/engine/toolchain.test.ts`:
+
+```ts
+  test("resolves the tools added for documents, data and vector", () => {
+    for (const [name, binary] of [
+      ["resvg", "resvg"],
+      ["dasel", "dasel"],
+      ["potrace", "potrace"],
+    ] as const) {
+      const result = resolveTool(name, {
+        platform: "darwin",
+        arch: "arm64",
+        bundleDir: "/nonexistent",
+        exists: (p) => p === `/opt/homebrew/bin/${binary}`,
+      });
+      expect(result, `${name} should resolve`).toBe(`/opt/homebrew/bin/${binary}`);
+    }
+  });
+
+  test("toCommandMap emits the new tools so converters can call them", () => {
+    // resvg.ts calls execFile("resvg", ...) by bare name. Without a CommandMap
+    // entry the lookup misses and every conversion reports the tool missing.
+    const commands = toCommandMap({
+      resvg: "/opt/homebrew/bin/resvg",
+      dasel: "/opt/homebrew/bin/dasel",
+      potrace: "/opt/homebrew/bin/potrace",
+    });
+    expect(commands.resvg).toBe("/opt/homebrew/bin/resvg");
+    expect(commands.dasel).toBe("/opt/homebrew/bin/dasel");
+    expect(commands.potrace).toBe("/opt/homebrew/bin/potrace");
+  });
+```
+
+Import `toCommandMap` from `../../src/main/engine/exec` in the toolchain test.
+
+- [ ] **Step 2: Run and confirm failure**
+
+Report both failures.
+
+- [ ] **Step 3: Extend `ToolName` and `KNOWN_TOOLS`**
+
+Add `"resvg" | "dasel" | "potrace"` to `ToolName`, and three entries to `KNOWN_TOOLS` following the existing shape. Verified present on this machine at `/opt/homebrew/bin/{resvg,dasel,potrace}`.
+
+```ts
+  resvg: {
+    binary: "resvg",
+    binaries: ["resvg"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/resvg", "/usr/local/bin/resvg"],
+      win32: ["C:\\Program Files\\resvg\\resvg.exe"],
+    },
+  },
+  dasel: {
+    binary: "dasel",
+    binaries: ["dasel"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/dasel", "/usr/local/bin/dasel"],
+      win32: ["C:\\Program Files\\dasel\\dasel.exe"],
+    },
+  },
+  potrace: {
+    binary: "potrace",
+    binaries: ["potrace"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/potrace", "/usr/local/bin/potrace"],
+      win32: ["C:\\Program Files\\potrace\\potrace.exe"],
+    },
+  },
+```
+
+- [ ] **Step 4: Make the dependency plural**
+
+In `src/main/engine/registry.ts`, replace `tool: ToolName` on `ConverterEntry` with:
+
+```ts
+  /**
+   * Every tool this converter shells out to. Plural because rasterTrace needs
+   * ImageMagick AND potrace - declaring one would offer the conversion while
+   * the other is missing, and it would fail at runtime with a bare
+   * "Tool not available".
+   */
+  tools: readonly ToolName[];
+```
+
+In `buildRegistry`, a converter is available only when ALL its tools resolved, and every unresolved one is reported missing:
+
+```ts
+  for (const [name, entry] of Object.entries(converters)) {
+    const missingForEntry = entry.tools.filter((tool) => !toolchain[tool]);
+    if (missingForEntry.length === 0) {
+      available.push({ ...entry, name });
+    } else {
+      for (const tool of missingForEntry) missing.add(tool);
+    }
+  }
+```
+
+Update every existing entry in `index.ts` and every fixture in the tests from `tool: "x"` to `tools: ["x"]`.
+
+- [ ] **Step 5: Confirm and commit**
+
+`npm test`, `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`.
+
+```bash
+git add src/main/engine/toolchain.ts src/main/engine/registry.ts src/main/engine/index.ts tests/engine/toolchain.test.ts tests/engine/registry.test.ts
+git commit -m "feat: register the new tools and let a converter depend on several"
+```
+
+---
+
 ### Task 5: Register everything
 
 **Files:**
@@ -589,15 +742,15 @@ Report which pairs fail and what they currently route to. Some may already route
 
 Add each converter to `CONVERTERS`. Priorities, highest first, with reasoning:
 
-- `electronPdf: 40` for markdown and html input. It must beat pandoc, which also claims `md -> pdf` but would need a LaTeX engine we do not ship and would fail at runtime.
+- `electronPdf: 40`, `tools: ["pandoc"]`, for markdown and html input. It must beat pandoc, which also claims `md -> pdf` but would need a LaTeX engine we do not ship and would fail at runtime.
 - `poppler: 30` (unchanged) for pdf input.
-- `rasterTrace: 25` for raster input to svg. Beats ImageMagick, which claims svg output but produces an embedded-bitmap svg rather than real vector paths.
+- `rasterTrace: 25`, `tools: ["imagemagick", "potrace"]`, for raster input to svg. Beats ImageMagick, which claims svg output but produces an embedded-bitmap svg rather than real vector paths.
 - `ffmpeg`: unchanged input-aware function.
-- `resvg: 15` for svg input. Beats ImageMagick for svg rasterisation, which is what resvg exists for.
+- `resvg: 15`, `tools: ["resvg"]`, for svg input. Beats ImageMagick for svg rasterisation, which is what resvg exists for.
 - `imagemagick: 10` (unchanged).
-- `pandoc: 10` for documents.
-- `potrace: 10` for bitmap input.
-- `dasel: 10` for data.
+- `pandoc: 10`, `tools: ["pandoc"]`, for documents.
+- `potrace: 10`, `tools: ["potrace"]`, for bitmap input.
+- `dasel: 10`, `tools: ["dasel"]`, for data.
 
 `electronPdf` needs the injected renderer wired at registration:
 
