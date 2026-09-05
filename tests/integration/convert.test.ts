@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { createEngine } from "../../src/main/engine";
-import { ensurePngFixture } from "../fixtures/make-fixtures";
+import {
+  ensurePngFixture,
+  ensureVideoFixture,
+  ensurePdfFixture,
+  ensureHeicFixture,
+} from "../fixtures/make-fixtures";
 
 const engine = createEngine("/nonexistent-bundle-dir");
 const magick = engine.toolchain.imagemagick;
@@ -40,4 +45,65 @@ describe.skipIf(!magick)("real conversion", () => {
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.error).toContain("No converter");
   });
+
+  test("converts heic to jpg, the spec's headline conversion", async () => {
+    const input = ensureHeicFixture(magick!);
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "jpg" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 3);
+    expect([...header]).toEqual([0xff, 0xd8, 0xff]);
+  });
 });
+
+describe.skipIf(!engine.toolchain.ffmpeg)("real ffmpeg conversion", () => {
+  test("converts mp4 to gif and writes a valid GIF", async () => {
+    const input = ensureVideoFixture(engine.toolchain.ffmpeg!);
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "gif" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 3);
+    expect(Buffer.from(header).toString()).toBe("GIF");
+  });
+
+  test("converts mp4 to mp3 audio", async () => {
+    const input = ensureVideoFixture(engine.toolchain.ffmpeg!);
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "mp3" }]);
+    // The generated fixture has no audio track, so ffmpeg is expected to fail
+    // here. What matters is that it fails HONESTLY rather than reporting a
+    // success with no file - the exact bug Plan 1 fixed.
+    if (results[0]?.ok) {
+      expect(existsSync(results[0].outputPath!)).toBe(true);
+    } else {
+      expect(results[0]?.error).toBeTruthy();
+    }
+  });
+});
+
+describe.skipIf(!engine.toolchain.poppler || !engine.toolchain.imagemagick)(
+  "real poppler conversion",
+  () => {
+    test("converts pdf to png and writes a valid PNG", async () => {
+      const input = ensurePdfFixture(engine.toolchain.imagemagick!);
+      const runner = createEngine("/nonexistent-bundle-dir").runner;
+      runner.options = { ...runner.options, outputDirFor: () => outDir };
+      const results = await runner.run([{ path: input, output: "png" }]);
+      expect(results[0]?.ok, results[0]?.error).toBe(true);
+      const header = readFileSync(results[0]!.outputPath!).subarray(0, 4);
+      expect([...header]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    });
+
+    test("extracts text from a pdf", async () => {
+      const input = ensurePdfFixture(engine.toolchain.imagemagick!);
+      const runner = createEngine("/nonexistent-bundle-dir").runner;
+      runner.options = { ...runner.options, outputDirFor: () => outDir };
+      const results = await runner.run([{ path: input, output: "txt" }]);
+      expect(results[0]?.ok, results[0]?.error).toBe(true);
+      expect(existsSync(results[0]!.outputPath!)).toBe(true);
+    });
+  },
+);
