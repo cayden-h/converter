@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * The window is vibrant, so the surface tokens are deliberately translucent.
+ * Both appearances are defined here rather than only overriding dark, so a
+ * system with no preference still gets a complete palette.
+ */
+:root {
+  --surface: 255 255 255;
+  --elevated: 248 248 250;
+  --border: 209 209 214;
+  --ink: 28 28 30;
+  --muted: 110 110 115;
+  --accent: 0 122 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: 28 28 30;
+    --elevated: 44 44 46;
+    --border: 72 72 74;
+    --ink: 245 245 247;
+    --muted: 152 152 157;
+    --accent: 10 132 255;
+  }
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  color: rgb(var(--ink));
+  background: transparent; /* let macOS vibrancy through */
+}
