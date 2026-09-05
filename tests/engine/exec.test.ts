@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createExecFile, toCommandMap } from "../../src/main/engine/exec";
+import { createExecFile, toCommandMap, nodeSpawn } from "../../src/main/engine/exec";
 
 describe("createExecFile", () => {
   test("rewrites a bare command name to the resolved absolute path", () => {
@@ -134,5 +134,32 @@ describe("toCommandMap", () => {
     );
     execFile("magick", [], () => {});
     expect(seenCmd).toBe("/opt/homebrew/bin/magick");
+  });
+});
+
+describe("nodeSpawn (the real child_process adapter)", () => {
+  // ExecFileFn is (cmd, args, callback, options) but node's execFile is
+  // (file, args, options, callback). Passing our order straight to node makes
+  // it read the callback as options and silently drop the real options. Every
+  // other test in this file injects a mock spawn, so only a test that actually
+  // crosses into node can catch this.
+  test.skipIf(process.platform === "win32")(
+    "passes options through to node instead of dropping them",
+    async () => {
+      const err = await new Promise<Error | null>((resolve) => {
+        nodeSpawn("/bin/echo", ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], (e) => resolve(e), {
+          maxBuffer: 1,
+        });
+      });
+      expect(err).toBeInstanceOf(Error);
+      expect(String(err)).toMatch(/maxBuffer/i);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")("still delivers stdout on success", async () => {
+    const stdout = await new Promise<string>((resolve) => {
+      nodeSpawn("/bin/echo", ["hello"], (_e, out) => resolve(out));
+    });
+    expect(stdout.trim()).toBe("hello");
   });
 });

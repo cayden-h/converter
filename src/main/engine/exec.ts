@@ -1,10 +1,28 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import type { ExecFileOptionsWithStringEncoding } from "node:child_process";
 import path from "node:path";
 import type { ExecFileFn } from "./types";
 import { KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
 
 /** Maps the bare command name a converter uses to its resolved absolute path. */
 export type CommandMap = Record<string, string>;
+
+/**
+ * Adapts node's execFile to the ExecFileFn shape.
+ *
+ * ExecFileFn is (cmd, args, callback, options); node's execFile is
+ * (file, args, options, callback). Casting node's function to ExecFileFn
+ * instead of adapting it makes node read the callback as the options object
+ * and silently discard the real options - so maxBuffer, timeout and cwd would
+ * all be ignored in production while every mock-injected test still passed.
+ *
+ * The options are asserted to the string-encoding overload because ExecFileFn
+ * promises the callback string stdout/stderr (never a Buffer), which is only
+ * true when node isn't given `encoding: "buffer"` - our options type doesn't
+ * narrow that far, so we assert it here rather than widen the shared type.
+ */
+export const nodeSpawn: ExecFileFn = (cmd, args, callback, options) =>
+  nodeExecFile(cmd, args, (options ?? {}) as ExecFileOptionsWithStringEncoding, callback);
 
 /**
  * Builds the ExecFileFn handed to lifted converter modules.
@@ -16,7 +34,7 @@ export type CommandMap = Record<string, string>;
  */
 export function createExecFile(
   commands: CommandMap,
-  spawn: ExecFileFn = nodeExecFile as ExecFileFn,
+  spawn: ExecFileFn = nodeSpawn,
 ): ExecFileFn {
   return (cmd, args, callback, options) => {
     const resolved = commands[cmd];
