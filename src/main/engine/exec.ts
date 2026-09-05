@@ -1,6 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import path from "node:path";
 import type { ExecFileFn } from "./types";
+import { KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
 
 /** Maps the bare command name a converter uses to its resolved absolute path. */
 export type CommandMap = Record<string, string>;
@@ -40,4 +41,20 @@ export function createExecFile(
     delete (safeOptions as { shell?: unknown }).shell;
     return spawn(resolved, args, callback, safeOptions);
   };
+}
+
+/**
+ * Rekeys a Toolchain (keyed by tool name, e.g. "imagemagick") into a
+ * CommandMap (keyed by the bare binary name a lifted converter passes to
+ * execFile, e.g. "magick").
+ *
+ * These two shapes are both Record<string, string>, so skipping this step
+ * type-checks and then silently resolves nothing. Always go through here.
+ */
+export function toCommandMap(toolchain: Toolchain): CommandMap {
+  const commands: CommandMap = {};
+  for (const [name, resolved] of Object.entries(toolchain)) {
+    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
+  }
+  return commands;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createExecFile } from "../../src/main/engine/exec";
+import { createExecFile, toCommandMap } from "../../src/main/engine/exec";
 
 describe("createExecFile", () => {
   test("rewrites a bare command name to the resolved absolute path", () => {
@@ -103,5 +103,36 @@ describe("createExecFile", () => {
     });
     expect(err).toBeInstanceOf(Error);
     expect(String(err)).toContain("absolute");
+  });
+});
+
+describe("toCommandMap", () => {
+  test("rekeys from tool name to the binary name converters actually call", () => {
+    // The whole point: Toolchain is keyed "imagemagick", but the lifted
+    // converter calls execFile("magick", ...). Without this remap the lookup
+    // misses and every conversion reports the tool as unavailable.
+    const commands = toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" });
+    expect(commands).toEqual({ magick: "/opt/homebrew/bin/magick" });
+  });
+
+  test("omits tools that did not resolve", () => {
+    const commands = toCommandMap({});
+    expect(commands).toEqual({});
+  });
+
+  test("round-trips through createExecFile so the wiring is proven end to end", () => {
+    // Guards the actual failure mode: passing the un-remapped Toolchain here
+    // would make this resolve nothing.
+    let seenCmd = "";
+    const spawn = (cmd: string, _a: string[], cb: (e: null, o: string, s: string) => void) => {
+      seenCmd = cmd;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile(
+      toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" }),
+      spawn,
+    );
+    execFile("magick", [], () => {});
+    expect(seenCmd).toBe("/opt/homebrew/bin/magick");
   });
 });
