@@ -4,8 +4,15 @@ import path from "node:path";
 export type ToolName = "imagemagick" | "ffmpeg" | "ffprobe" | "poppler" | "pandoc";
 
 export interface ToolSpec {
-  /** Executable name without extension. */
+  /** Primary executable name, without extension. Also the CommandMap key. */
   binary: string;
+  /**
+   * Every executable this tool provides, primary first. Most tools have one.
+   * Poppler is a suite: pdftoppm, pdftotext and pdfimages ship together in the
+   * same directory, and listing them here keeps their platform paths in one
+   * entry instead of fragmenting them across three.
+   */
+  binaries: readonly string[];
   /**
    * Known absolute install locations per platform, searched in order after
    * the bundled directory. This object is the ONLY place in the codebase
@@ -17,6 +24,7 @@ export interface ToolSpec {
 export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   imagemagick: {
     binary: "magick",
+    binaries: ["magick"],
     systemPaths: {
       darwin: ["/opt/homebrew/bin/magick", "/usr/local/bin/magick"],
       win32: ["C:\\Program Files\\ImageMagick\\magick.exe"],
@@ -24,6 +32,7 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
   ffmpeg: {
     binary: "ffmpeg",
+    binaries: ["ffmpeg"],
     systemPaths: {
       darwin: ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"],
       win32: ["C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"],
@@ -31,6 +40,7 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
   ffprobe: {
     binary: "ffprobe",
+    binaries: ["ffprobe"],
     systemPaths: {
       darwin: ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"],
       win32: ["C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe"],
@@ -38,6 +48,7 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
   poppler: {
     binary: "pdftoppm",
+    binaries: ["pdftoppm", "pdftotext", "pdfimages"],
     systemPaths: {
       darwin: ["/opt/homebrew/bin/pdftoppm", "/usr/local/bin/pdftoppm"],
       win32: ["C:\\Program Files\\poppler\\bin\\pdftoppm.exe"],
@@ -45,6 +56,7 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
   pandoc: {
     binary: "pandoc",
+    binaries: ["pandoc"],
     systemPaths: {
       darwin: ["/opt/homebrew/bin/pandoc", "/usr/local/bin/pandoc"],
       win32: ["C:\\Program Files\\Pandoc\\pandoc.exe"],
@@ -64,6 +76,8 @@ export interface ResolveOptions {
   arch: string;
   bundleDir: string;
   exists?: (p: string) => boolean;
+  /** Which binary of a suite to resolve. Defaults to the tool's primary. */
+  binary?: string;
 }
 
 export function resolveTool(name: ToolName, options: ResolveOptions): string | null {
@@ -78,16 +92,23 @@ export function resolveTool(name: ToolName, options: ResolveOptions): string | n
   const join = isWindows ? path.win32.join : path.posix.join;
   const ext = isWindows ? ".exe" : "";
 
+  const wanted = options.binary ?? spec.binary;
+  if (!spec.binaries.includes(wanted)) return null;
+
   const bundled = join(
     options.bundleDir,
     `${options.platform}-${options.arch}`,
-    `${spec.binary}${ext}`,
+    `${wanted}${ext}`,
   );
   if (exists(bundled)) return bundled;
 
   const systemPaths = isWindows ? spec.systemPaths.win32 : spec.systemPaths.darwin;
   for (const candidate of systemPaths) {
-    if (exists(candidate)) return candidate;
+    // systemPaths are written against the primary binary; a suite's siblings
+    // live in the same directory.
+    const dir = isWindows ? path.win32.dirname(candidate) : path.posix.dirname(candidate);
+    const resolved = join(dir, `${wanted}${ext}`);
+    if (exists(resolved)) return resolved;
   }
 
   return null;
