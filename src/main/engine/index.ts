@@ -1,6 +1,7 @@
 import path from "node:path";
 import { convert as convertImagemagick, properties as propertiesImagemagick } from "./converters/imagemagick";
 import { convert as convertFfmpeg, properties as propertiesFfmpeg } from "./converters/ffmpeg";
+import { convert as convertPoppler, properties as propertiesPoppler } from "./converters/poppler";
 import { JobRunner } from "./job";
 import { buildRegistry, type ConverterEntry, type Registry } from "./registry";
 import {
@@ -46,6 +47,14 @@ const CONVERTERS: Record<string, ConverterEntry> = {
     priority: 10,
     properties: propertiesImagemagick,
     convert: convertImagemagick,
+  },
+  // Highest priority for PDF input: ImageMagick can read PDFs only through a
+  // ghostscript delegate that is often absent, and it rasterizes badly.
+  poppler: {
+    tool: "poppler",
+    priority: 30,
+    properties: propertiesPoppler,
+    convert: convertPoppler,
   },
 };
 

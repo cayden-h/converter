@@ -90,7 +90,15 @@ export function createExecFile(
 export function toCommandMap(toolchain: Toolchain): CommandMap {
   const commands: CommandMap = {};
   for (const [name, resolved] of Object.entries(toolchain)) {
-    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
+    if (!resolved) continue;
+    const spec = KNOWN_TOOLS[name as ToolName];
+    commands[spec.binary] = resolved;
+    // A suite's siblings live beside the primary; without this, pdftotext
+    // resolves to nothing while pdftoppm works.
+    for (const sibling of spec.binaries) {
+      if (sibling === spec.binary) continue;
+      commands[sibling] = path.join(path.dirname(resolved), sibling);
+    }
   }
   return commands;
 }

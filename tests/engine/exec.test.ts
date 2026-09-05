@@ -176,6 +176,12 @@ describe("toCommandMap", () => {
     expect(commands).toEqual({});
   });
 
+  test("maps every binary of a suite, not just the primary", () => {
+    const commands = toCommandMap({ poppler: "/opt/homebrew/bin/pdftoppm" });
+    expect(commands.pdftoppm).toBe("/opt/homebrew/bin/pdftoppm");
+    expect(commands.pdftotext).toBe("/opt/homebrew/bin/pdftotext");
+  });
+
   test("round-trips through createExecFile so the wiring is proven end to end", () => {
     // Guards the actual failure mode: passing the un-remapped Toolchain here
     // would make this resolve nothing.
