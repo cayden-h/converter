@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { createExecFile, type CommandMap } from "./exec";
-import { normalizeOutputFiletype } from "./normalizeFiletype";
+import type { ChildProcess } from "node:child_process";
+import { createExecFile, nodeSpawn, type CommandMap } from "./exec";
+import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
 import type { Registry } from "./registry";
+import type { ExecFileFn } from "./types";
 
 export interface JobItem {
   path: string;
@@ -27,6 +29,8 @@ export interface JobRunnerOptions {
   outputDirFor: (inputPath: string) => string;
   concurrency?: number;
   timeoutMs?: number;
+  /** Injectable for tests. Defaults to the real child_process adapter. */
+  spawn?: ExecFileFn;
 }
 
 const DEFAULT_CONCURRENCY = 3;
@@ -44,6 +48,7 @@ export class JobRunner extends EventEmitter {
   async run(items: JobItem[]): Promise<JobResult[]> {
     const concurrency = this.options.concurrency ?? DEFAULT_CONCURRENCY;
     const results = new Array<JobResult>(items.length);
+    const claimed = new Set<string>();
     let cursor = 0;
 
     const worker = async () => {
@@ -51,7 +56,7 @@ export class JobRunner extends EventEmitter {
         const index = cursor++;
         if (index >= items.length) return;
         const item = items[index]!;
-        results[index] = await this.runOne(item);
+        results[index] = await this.runOne(item, claimed);
       }
     };
 
@@ -61,8 +66,30 @@ export class JobRunner extends EventEmitter {
     return results;
   }
 
-  private async runOne(item: JobItem): Promise<JobResult> {
-    const inputType = path.extname(item.path).slice(1);
+  /**
+   * Two inputs in one batch can map to the same output name (a.png and a.jpeg
+   * both become a.jpg). Without this, one silently overwrites the other while
+   * both report success. Collisions are resolved within the batch only; an
+   * existing file on disk from an earlier run is still overwritten.
+   */
+  private claimOutputPath(
+    directory: string,
+    base: string,
+    extension: string,
+    claimed: Set<string>,
+  ): string {
+    let candidate = path.join(directory, `${base}.${extension}`);
+    let suffix = 1;
+    while (claimed.has(candidate)) {
+      candidate = path.join(directory, `${base}-${suffix}.${extension}`);
+      suffix += 1;
+    }
+    claimed.add(candidate);
+    return candidate;
+  }
+
+  private async runOne(item: JobItem, claimed: Set<string>): Promise<JobResult> {
+    const inputType = normalizeFiletype(path.extname(item.path).slice(1));
     const converter = this.registry.converterFor(inputType, item.output);
 
     if (!converter) {
@@ -73,16 +100,38 @@ export class JobRunner extends EventEmitter {
 
     const extension = normalizeOutputFiletype(item.output);
     const base = path.basename(item.path, path.extname(item.path));
-    const outputPath = path.join(this.options.outputDirFor(item.path), `${base}.${extension}`);
+    const outputPath = this.claimOutputPath(
+      this.options.outputDirFor(item.path),
+      base,
+      extension,
+      claimed,
+    );
 
     this.emit("progress", { path: item.path, status: "running" } as ProgressEvent);
 
-    const execFile = createExecFile(this.options.commands);
+    // Track spawned children so a timeout can actually kill them. Promise.race
+    // abandons the losing promise but never cancels the work behind it, so
+    // without this the child keeps running and can write its output after the
+    // job has already been reported as failed.
+    const children = new Set<ChildProcess>();
+    const baseSpawn = this.options.spawn ?? nodeSpawn;
+    const execFile = createExecFile(this.options.commands, (cmd, args, cb, opts) => {
+      const child = baseSpawn(cmd, args, cb, opts) as ChildProcess | undefined;
+      if (child) {
+        children.add(child);
+        child.on("close", () => children.delete(child));
+      }
+      return child;
+    });
+
     const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+      timer = setTimeout(() => {
+        for (const child of children) child.kill("SIGKILL");
+        reject(new Error(`Timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
     });
 
     try {

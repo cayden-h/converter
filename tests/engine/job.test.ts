@@ -7,7 +7,10 @@ function registryWith(convert: () => Promise<string>) {
     {
       fake: {
         tool: "imagemagick",
-        properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+        // "jpeg" is included alongside "png" so the collision test below can
+        // route both a.png and a.jpeg to jpg without an unrelated routing
+        // failure masking the collision behavior under test.
+        properties: { from: { images: ["png", "jpeg"] }, to: { images: ["jpeg"] } },
         convert,
       },
     },
@@ -125,5 +128,79 @@ describe("JobRunner", () => {
     const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.error).toContain("Timed out");
+  });
+
+  test("does not let two inputs collide onto one output path", async () => {
+    // a.png and a.jpeg both convert to a.jpg. Without disambiguation one
+    // silently overwrites the other while BOTH report ok.
+    const runner = new JobRunner(registryWith(async () => "Done"), {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+    });
+    const results = await runner.run([
+      { path: "/in/a.png", output: "jpg" },
+      { path: "/in/a.jpeg", output: "jpg" },
+    ]);
+    expect(results[0]?.ok).toBe(true);
+    expect(results[1]?.ok).toBe(true);
+    expect(results[0]?.outputPath).not.toBe(results[1]?.outputPath);
+  });
+
+  test("kills the child process when a conversion times out", async () => {
+    let killed = false;
+    const fakeChild = {
+      kill: () => {
+        killed = true;
+      },
+      on: () => {},
+    };
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "imagemagick",
+          properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+          // Never settles, so the timeout always wins the race.
+          convert: (_f, _t, _c, _p, _o, execFileOverride) =>
+            new Promise<string>(() => {
+              execFileOverride?.("magick", [], () => {});
+            }),
+        },
+      },
+      { imagemagick: "/bin/magick" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+      timeoutMs: 20,
+      spawn: () => fakeChild as never,
+    });
+    const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    expect(results[0]?.ok).toBe(false);
+    expect(killed, "timed-out conversion must not leave an orphan process").toBe(true);
+  });
+
+  test("hands the converter a normalized file type, not the raw extension", async () => {
+    // Lifted converters compare fileType literally (fileType === "svg"), so an
+    // uppercase extension would miss its special-case branch.
+    let seenType = "";
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "imagemagick",
+          properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+          convert: async (_f, fileType) => {
+            seenType = fileType;
+            return "Done";
+          },
+        },
+      },
+      { imagemagick: "/bin/magick" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+    });
+    await runner.run([{ path: "/in/PHOTO.PNG", output: "jpg" }]);
+    expect(seenType).toBe("png");
   });
 });
