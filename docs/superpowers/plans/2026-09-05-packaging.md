@@ -29,6 +29,8 @@ The real closure, measured by walking `otool -L` transitively:
 | potrace | 2 | 0.2 MB |
 | **union** | **35** | **320.9 MB** |
 
+Plus, discovered later and NOT visible to `otool`: ImageMagick's **130 coder modules (7.1MB)** and **276KB of XML config**. See Task 1b.
+
 Two things that makes tractable: ffmpeg's 19 direct dependencies resolve to only 20 files because they are heavily shared, and 35 files is a small enough set to relocate mechanically.
 
 **pandoc is 265MB of the 321MB total** - it is a statically-linked Haskell binary, and almost all of that is the executable itself, not dependencies. With Electron's own ~200MB the finished app lands around 520MB. That is large but not unreasonable for a converter that works offline with no install steps.
@@ -260,6 +262,150 @@ env -i resources/bin/darwin-arm64/bin/magick --version | head -1
 ```bash
 git add scripts/vendor-binaries.ts tests/scripts/vendor.test.ts package.json
 git commit -m "build: add a script that vendors the tools and their dylib closure"
+```
+
+---
+
+### Task 1b: Vendor ImageMagick's coder modules
+
+Task 4 ran real conversions through the packaged app and found the bundled ImageMagick **cannot decode any image format at all**:
+
+```
+bundled magick -list format   ->    0 formats
+homebrew magick -list format  ->  273 formats
+magick: no decode delegate for this image format `xc:red'
+```
+
+This is not a Homebrew-absence bug. The bundled binary is broken everywhere, including on this machine.
+
+**Why `otool -L` could never have caught it.** Homebrew builds ImageMagick with `--with-modules`, confirmed in its own configure line and its `FEATURES` list. Every format coder is a separate `.so` that libMagickCore `dlopen`s at runtime from a compiled-in absolute path:
+
+```
+CODER_PATH  /opt/homebrew/Cellar/imagemagick/7.1.2-31/lib/ImageMagick/modules-Q16HDRI/coders
+```
+
+Those modules are not linked, so they do not appear in the dependency graph the vendor script walks. The script is structurally blind to them.
+
+**Why simply setting the env var is not enough.** `MAGICK_CODER_MODULE_PATH` IS honoured - pointing Homebrew's own magick at a nonexistent directory drops it to 0 formats. But pointing the BUNDLED magick at the real Homebrew coder directory also yields 0, because each coder `.so` links `/opt/homebrew/.../libMagickCore-7.Q16HDRI.10.dylib` - the original. Loading one into a process already running the relocated libMagickCore pulls in a second copy of the same library, and the module load fails silently.
+
+So the coders must be vendored AND relocated, exactly like the top-level dylibs.
+
+Scope: **130 `.so` files, 7.1MB**, plus **276KB of XML config** (`delegates.xml`, `policy.xml`, `type.xml` and friends) which ImageMagick also reads from a compiled-in path.
+
+**Files:**
+- Modify: `scripts/vendor-binaries.ts`
+- Modify: `src/main/engine/index.ts`
+- Modify: `tests/scripts/vendor.test.ts`
+- Create: `tests/engine/imagemagickModules.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/engine/imagemagickModules.test.ts`:
+
+```ts
+import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { describe, expect, test } from "vitest";
+
+const BUNDLE = "resources/bin/darwin-arm64";
+const MAGICK = `${BUNDLE}/bin/magick`;
+
+describe.skipIf(!existsSync(MAGICK))("bundled ImageMagick", () => {
+  test("ships its coder modules", () => {
+    // Homebrew builds ImageMagick --with-modules, so every format is a
+    // separate .so dlopen'd at runtime. They are invisible to otool -L, which
+    // is why the dylib-closure walk missed them entirely.
+    expect(existsSync(`${BUNDLE}/lib/ImageMagick/modules-Q16HDRI/coders`)).toBe(true);
+  });
+
+  test("ships its XML configuration", () => {
+    expect(existsSync(`${BUNDLE}/etc/ImageMagick-7/delegates.xml`)).toBe(true);
+  });
+
+  test("actually knows about image formats", () => {
+    // The real assertion. A magick that resolves, runs, and reports --version
+    // correctly can still know zero formats and convert nothing.
+    const output = execFileSync(MAGICK, ["-list", "format"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        MAGICK_CODER_MODULE_PATH: `${process.cwd()}/${BUNDLE}/lib/ImageMagick/modules-Q16HDRI/coders`,
+        MAGICK_CONFIGURE_PATH: `${process.cwd()}/${BUNDLE}/etc/ImageMagick-7`,
+      },
+    });
+    const formats = output.split("\n").filter((line) => /^ +[A-Z0-9]+/.test(line));
+    expect(formats.length, "bundled magick must know some formats").toBeGreaterThan(100);
+  });
+
+  test("converts a real file using only bundled coders", () => {
+    const env = {
+      ...process.env,
+      MAGICK_CODER_MODULE_PATH: `${process.cwd()}/${BUNDLE}/lib/ImageMagick/modules-Q16HDRI/coders`,
+      MAGICK_CONFIGURE_PATH: `${process.cwd()}/${BUNDLE}/etc/ImageMagick-7`,
+    };
+    const png = "/tmp/converter-modules-test.png";
+    const jpg = "/tmp/converter-modules-test.jpg";
+    execFileSync(MAGICK, ["-size", "32x32", "xc:red", png], { env });
+    execFileSync(MAGICK, [png, jpg], { env });
+    expect(existsSync(jpg)).toBe(true);
+  });
+
+  test("no coder module links homebrew", () => {
+    // Each coder links libMagickCore. If it links the ORIGINAL, loading it
+    // pulls a second copy of that library into the process and the module
+    // silently fails to load - which is exactly what broke the first bundle.
+    const coders = `${BUNDLE}/lib/ImageMagick/modules-Q16HDRI/coders`;
+    const output = execFileSync(
+      "bash",
+      ["-c", `find ${coders} -name '*.so' -exec otool -L {} \\; | grep -c '/opt/homebrew' || true`],
+      { encoding: "utf8" },
+    );
+    expect(Number(output.trim()), "coder modules still link homebrew").toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2: Run and confirm failure**
+
+Expect the module directory to be absent and the format count to be 0. **Report it.**
+
+- [ ] **Step 3: Extend the vendor script**
+
+After the dylib closure is copied and relocated, additionally:
+
+1. Locate ImageMagick's `CODER_PATH` and `CONFIGURE_PATH` by running `magick -list configure` and parsing those two lines. Do not hardcode the version - it changes with every Homebrew upgrade.
+2. Copy the whole coders directory to `<bundle>/lib/ImageMagick/modules-Q16HDRI/coders`, and the config directory to `<bundle>/etc/ImageMagick-7`.
+3. Relocate every `.so` exactly like the dylibs: `chmod u+w`, rewrite each `/opt/homebrew` reference to `@executable_path/../lib/<basename>`, then ad-hoc sign.
+
+Note the coders sit two directories deeper than `bin/`, so `@executable_path` still resolves correctly - it is relative to the EXECUTABLE, not to the module. That is why `@executable_path` is right here and `@loader_path` would not be.
+
+- [ ] **Step 4: Point the app at the bundled modules**
+
+In `src/main/engine/index.ts`, when a bundled magick resolves, set the two environment variables so spawned children inherit them:
+
+```ts
+  // ImageMagick loads format coders as separate .so modules from a path
+  // compiled in at build time, which points into Homebrew. Without these the
+  // bundled binary runs, reports its version, and knows zero formats.
+  const bundledMagick = toolchain.imagemagick;
+  if (bundledMagick?.startsWith(bundleDir)) {
+    const root = path.join(bundleDir, `${process.platform}-${process.arch}`);
+    process.env.MAGICK_CODER_MODULE_PATH = path.join(root, "lib/ImageMagick/modules-Q16HDRI/coders");
+    process.env.MAGICK_CONFIGURE_PATH = path.join(root, "etc/ImageMagick-7");
+  }
+```
+
+`createExecFile` passes no `env` in its options, so children inherit `process.env` - setting it here is sufficient and avoids threading env through the exec layer.
+
+- [ ] **Step 5: Re-vendor and verify**
+
+Run `npm run vendor` again, then the new test file. **Report the format count.** It must exceed 100; 0 means the relocation of the coders did not take.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/vendor-binaries.ts src/main/engine/index.ts tests/scripts/vendor.test.ts tests/engine/imagemagickModules.test.ts
+git commit -m "fix: vendor ImageMagick's coder modules, without which it knows no formats"
 ```
 
 ---
