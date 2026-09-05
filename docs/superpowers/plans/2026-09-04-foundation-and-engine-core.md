@@ -1156,6 +1156,125 @@ git commit -m "feat: add job runner with concurrency cap and timeouts"
 
 ---
 
+### Task 6b: Split tsconfig to enforce the layer boundary
+
+Raised by the Task 1 quality review. The single root `tsconfig.json` applies `types: ["node"]` and the DOM lib to every layer, so renderer code typechecks against `fs`, `child_process`, and `process` even though it runs with `nodeIntegration: false` and `sandbox: true`. TypeScript would not catch a renderer file importing a Node builtin; it would surface as a runtime crash. This must land before Tasks 7 and 8 write real main and renderer code.
+
+**Files:**
+- Create: `tsconfig.node.json`
+- Create: `tsconfig.web.json`
+- Modify: `tsconfig.json` (replace entirely)
+- Modify: `package.json` (the `build` script only)
+
+- [ ] **Step 1: Create `tsconfig.node.json` for main, preload, shared, and tests**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*", "*.config.ts"]
+}
+```
+
+Note there is no `DOM` lib here. Main-process code that references `document` or a DOM-flavored `fetch` type now fails to compile.
+
+- [ ] **Step 2: Create `tsconfig.web.json` for the renderer**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src/renderer/**/*", "src/shared/**/*"]
+}
+```
+
+`"types": []` is the load-bearing line. It removes `@types/node` from the renderer program, so a renderer file importing `node:fs` or referencing `process` now fails to compile. `src/shared/**/*` appears in both projects deliberately: shared IPC types must compile under both, which is exactly the constraint we want on them.
+
+- [ ] **Step 3: Replace `tsconfig.json` with a solution file**
+
+```json
+{
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}
+```
+
+- [ ] **Step 4: Point the build script at both projects**
+
+In `package.json`, change the `build` script from:
+
+```
+"build": "tsc --noEmit && electron-vite build",
+```
+
+to:
+
+```
+"build": "tsc -b tsconfig.node.json tsconfig.web.json && electron-vite build",
+```
+
+Leave every other script unchanged.
+
+- [ ] **Step 5: Verify both projects typecheck**
+
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
+
+Note: `tsc -b` with `noEmit` requires TypeScript 5.6 or newer. The installed version is 5.9.3, so this is fine.
+
+- [ ] **Step 6: Prove the boundary is actually enforced**
+
+This is the point of the task, so verify it rather than assuming. Temporarily append to `src/renderer/main.tsx`:
+
+```ts
+import { existsSync } from "node:fs";
+console.log(existsSync);
+```
+
+Run: `npx tsc -b tsconfig.web.json; echo "exit=$?"`
+Expected: NON-ZERO exit, with an error like `Cannot find module 'node:fs' or its corresponding type declarations`.
+
+If it exits 0, the boundary is not enforced and the task is not done. Investigate before proceeding.
+
+Then remove those two lines and re-run to confirm `exit=0` again.
+
+- [ ] **Step 7: Confirm the test suite still runs**
+
+Run: `npm test`
+Expected: all existing suites still pass. Vitest does not read `tsconfig.json` for test discovery, so this should be unaffected, but confirm rather than assume.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add tsconfig.json tsconfig.node.json tsconfig.web.json package.json
+git commit -m "build: split tsconfig so renderer cannot reference node builtins"
+```
+
+---
+
 ### Task 7: Electron main process, offline enforcement, and IPC
 
 **Files:**
@@ -1418,8 +1537,8 @@ contextBridge.exposeInMainWorld("converter", api);
 
 - [ ] **Step 9: Verify typecheck passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
 - [ ] **Step 10: Commit**
 
@@ -1579,8 +1698,8 @@ createRoot(document.getElementById("root")!).render(<App />);
 
 - [ ] **Step 4: Verify typecheck passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
 - [ ] **Step 5: Build and run the app for real**
 
@@ -1705,8 +1824,8 @@ Expected: all suites pass. Total should be 38 tests across 7 files: toolchain 6,
 
 - [ ] **Step 5: Verify typecheck still passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
 - [ ] **Step 6: Commit and push**
 
@@ -1721,7 +1840,7 @@ git push origin main
 ## Definition of Done
 
 - `npm test` passes with unit coverage of toolchain, exec, registry, job, offline, and the lifted converter, plus a real png to jpg integration test.
-- `npx tsc --noEmit` exits 0.
+- `npx tsc -b tsconfig.node.json tsconfig.web.json` exits 0, and a renderer file importing a Node builtin fails to compile.
 - `npm run build && npm start` opens a window, lists detected tools with absolute paths, and converts a dropped png to jpg with Reveal working.
 - No platform-specific path exists outside `src/main/engine/toolchain.ts`.
 - `THIRD_PARTY.md` records the ConvertX attribution and the AGPL-3.0 obligation.
