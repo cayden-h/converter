@@ -640,6 +640,9 @@ import { execFile as nodeExecFile } from "node:child_process";
 import path from "node:path";
 import type { ExecFileFn } from "./types";
 
+/** 64MB. Generous enough for image and video tool output; node defaults to 1MB. */
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
+
 /** Maps the bare command name a converter uses to its resolved absolute path. */
 export type CommandMap = Record<string, string>;
 
@@ -674,8 +677,23 @@ export function createExecFile(
       return;
     }
 
-    const safeOptions = { ...(options ?? {}) };
-    delete (safeOptions as { shell?: unknown }).shell;
+    const safeOptions: Record<string, unknown> = { ...(options ?? {}) };
+
+    // Never let a command string reach a shell parser.
+    delete safeOptions.shell;
+
+    // ExecFileFn's callback is typed for string stdout/stderr, but node decides
+    // Buffer-vs-string from options.encoding at RUNTIME. A converter passing
+    // "buffer" would hand Buffers to code that declares strings, and no type
+    // assertion can prevent that - so enforce the contract at the boundary.
+    if (safeOptions.encoding === "buffer") delete safeOptions.encoding;
+
+    // Lifted converters are byte-identical to upstream and never set maxBuffer,
+    // so without this they inherit node's 1MB default. ImageMagick and ffmpeg
+    // can exceed that on large files, failing in a way that reads as a broken
+    // conversion rather than a truncated pipe.
+    if (safeOptions.maxBuffer === undefined) safeOptions.maxBuffer = DEFAULT_MAX_BUFFER;
+
     return spawn(resolved, args, callback, safeOptions);
   };
 }
