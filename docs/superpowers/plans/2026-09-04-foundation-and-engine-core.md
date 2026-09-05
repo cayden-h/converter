@@ -843,6 +843,109 @@ git commit -m "feat: lift ImageMagick converter from ConvertX with attribution"
 
 ---
 
+### Task 4b: Make the toolchain-to-command remap explicit and tested
+
+Raised by the Task 3 quality review. `Toolchain` is keyed by TOOL name (`imagemagick`); `CommandMap` is keyed by BINARY name (`magick`), because that is the bare string lifted converters actually pass to `execFile`. Both are `Record<string, string>`-shaped, so handing a `Toolchain` straight to `createExecFile` compiles cleanly and then silently resolves nothing - every conversion fails with `Tool not available: magick` while the tool sits correctly detected on disk. Task 7 does this remap inline, which leaves the invariant as tribal knowledge. Give it a name and a test.
+
+**Files:**
+- Modify: `src/main/engine/exec.ts` (add one exported function and two imports)
+- Modify: `tests/engine/exec.test.ts` (add one describe block)
+
+- [ ] **Step 1: Add the failing test**
+
+Append to `tests/engine/exec.test.ts`, after the existing `describe("createExecFile", ...)` block:
+
+```ts
+describe("toCommandMap", () => {
+  test("rekeys from tool name to the binary name converters actually call", () => {
+    // The whole point: Toolchain is keyed "imagemagick", but the lifted
+    // converter calls execFile("magick", ...). Without this remap the lookup
+    // misses and every conversion reports the tool as unavailable.
+    const commands = toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" });
+    expect(commands).toEqual({ magick: "/opt/homebrew/bin/magick" });
+  });
+
+  test("omits tools that did not resolve", () => {
+    const commands = toCommandMap({});
+    expect(commands).toEqual({});
+  });
+
+  test("round-trips through createExecFile so the wiring is proven end to end", () => {
+    // Guards the actual failure mode: passing the un-remapped Toolchain here
+    // would make this resolve nothing.
+    let seenCmd = "";
+    const spawn = (cmd: string, _a: string[], cb: (e: null, o: string, s: string) => void) => {
+      seenCmd = cmd;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile(toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" }), spawn);
+    execFile("magick", [], () => {});
+    expect(seenCmd).toBe("/opt/homebrew/bin/magick");
+  });
+});
+```
+
+Update the import at the top of the file to include the new function:
+
+```ts
+import { createExecFile, toCommandMap } from "../../src/main/engine/exec";
+```
+
+- [ ] **Step 2: Run and confirm failure**
+
+Run: `npx vitest run tests/engine/exec.test.ts`
+Expected: FAIL - `toCommandMap` is not exported.
+
+- [ ] **Step 3: Implement**
+
+In `src/main/engine/exec.ts`, add to the imports:
+
+```ts
+import { KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
+```
+
+and append this function to the end of the file:
+
+```ts
+/**
+ * Rekeys a Toolchain (keyed by tool name, e.g. "imagemagick") into a
+ * CommandMap (keyed by the bare binary name a lifted converter passes to
+ * execFile, e.g. "magick").
+ *
+ * These two shapes are both Record<string, string>, so skipping this step
+ * type-checks and then silently resolves nothing. Always go through here.
+ */
+export function toCommandMap(toolchain: Toolchain): CommandMap {
+  const commands: CommandMap = {};
+  for (const [name, resolved] of Object.entries(toolchain)) {
+    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
+  }
+  return commands;
+}
+```
+
+- [ ] **Step 4: Confirm pass**
+
+Run: `npx vitest run tests/engine/exec.test.ts`
+Expected: PASS, 10 tests.
+
+- [ ] **Step 5: Full suite and typecheck**
+
+Run: `npm test`
+Expected: 37 tests across 4 files (toolchain 11, exec 10, imagemagick 6, registry 10).
+
+Run: `npx tsc --noEmit; echo "exit=$?"`
+Expected: `exit=0`
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/main/engine/exec.ts tests/engine/exec.test.ts
+git commit -m "feat: add toCommandMap so the toolchain-to-binary remap is explicit"
+```
+
+---
+
 ### Task 5: Converter registry
 
 Builds the `from -> to -> converter` index, filtered to tools that actually resolved.
@@ -924,6 +1027,28 @@ describe("buildRegistry", () => {
     expect(registry.missingTools()).toEqual(["imagemagick"]);
   });
 
+  test("offers jpg, not jpeg, so the picker matches the produced filename", () => {
+    // Regression guard. The registry once folded outputs with the INPUT
+    // normalizer, so it advertised "jpeg" while the written file was ".jpg".
+    // A fake converter cannot catch this, hence the real format list below.
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    const outputs = registry.outputsFor("png");
+    expect(outputs).toContain("jpg");
+    expect(outputs).not.toContain("jpeg");
+  });
+
+  test("routes both jpg and jpeg spellings to the same converter", () => {
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    expect(registry.converterFor("png", "jpg")?.name).toBe("imagemagick");
+    expect(registry.converterFor("png", "jpeg")?.name).toBe("imagemagick");
+  });
+
   test("output list is sorted and deduplicated", () => {
     const registry = buildRegistry(
       { imagemagick: { tool: "imagemagick", ...fakeConverter } },
@@ -945,7 +1070,7 @@ Expected: FAIL, cannot resolve module `src/main/engine/registry`.
 `src/main/engine/registry.ts`:
 
 ```ts
-import { normalizeFiletype } from "./normalizeFiletype";
+import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
 import type { ToolName, Toolchain } from "./toolchain";
 import type { ExecFileFn } from "./types";
 
@@ -983,10 +1108,28 @@ export interface Registry {
   available(): ResolvedConverter[];
 }
 
-function flatten(formats: Record<string, string[]>): Set<string> {
+/**
+ * Input formats are folded with normalizeFiletype (jpg -> jpeg), because that
+ * is the spelling converters match on when deciding what they accept.
+ */
+function flattenInputs(formats: Record<string, string[]>): Set<string> {
   const out = new Set<string>();
   for (const list of Object.values(formats)) {
     for (const format of list) out.add(normalizeFiletype(format));
+  }
+  return out;
+}
+
+/**
+ * Output formats are folded with normalizeOutputFiletype (jpeg -> jpg),
+ * because these strings are BOTH what the picker shows the user and what the
+ * produced file is named. Using the input normalizer here would offer "jpeg"
+ * in the UI and then write a file called ".jpg".
+ */
+function flattenOutputs(formats: Record<string, string[]>): Set<string> {
+  const out = new Set<string>();
+  for (const list of Object.values(formats)) {
+    for (const format of list) out.add(normalizeOutputFiletype(format));
   }
   return out;
 }
@@ -1008,8 +1151,8 @@ export function buildRegistry(
 
   const index = available.map((converter) => ({
     converter,
-    from: flatten(converter.properties.from),
-    to: flatten(converter.properties.to),
+    from: flattenInputs(converter.properties.from),
+    to: flattenOutputs(converter.properties.to),
   }));
 
   return {
@@ -1025,7 +1168,9 @@ export function buildRegistry(
 
     converterFor(input, output) {
       const from = normalizeFiletype(input);
-      const to = normalizeFiletype(output);
+      // Normalize the requested output the same way the `to` set was built, so
+      // that both "jpg" and "jpeg" from a caller route to the same converter.
+      const to = normalizeOutputFiletype(output);
       for (const entry of index) {
         if (entry.from.has(from) && entry.to.has(to)) return entry.converter;
       }
@@ -1046,7 +1191,7 @@ export function buildRegistry(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/registry.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1559,7 +1704,7 @@ import {
   type ToolName,
   type Toolchain,
 } from "./toolchain";
-import type { CommandMap } from "./exec";
+import { toCommandMap } from "./exec";
 
 const CONVERTERS: Record<string, ConverterEntry> = {
   imagemagick: {
@@ -1591,10 +1736,9 @@ export function createEngine(bundleDir: string): Engine {
 
   const registry = buildRegistry(CONVERTERS, toolchain);
 
-  const commands: CommandMap = {};
-  for (const [name, resolved] of Object.entries(toolchain)) {
-    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
-  }
+  // Rekeys tool names to binary names. See toCommandMap's doc comment for why
+  // skipping this silently breaks every conversion.
+  const commands = toCommandMap(toolchain);
 
   const runner = new JobRunner(registry, {
     commands,
@@ -1980,7 +2124,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 46 tests across 7 files: toolchain 11, exec 7, imagemagick 6, registry 8, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 51 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 10, job 6, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
