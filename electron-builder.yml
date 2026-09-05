@@ -1,0 +1,25 @@
+appId: dev.cayden.converter
+productName: Converter
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+# The vendored tools must stay OUTSIDE the asar archive: they are executables
+# and dylibs, and macOS cannot exec or dlopen a file inside an asar.
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter: ["**/*"]
+asar: true
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.utilities
+  hardenedRuntime: false
+  # Ad-hoc signing by decision: the available certificate is an Apple
+  # Development identity, which cannot notarize. `null` makes electron-builder
+  # skip its own signing so the vendor script's ad-hoc signatures survive.
+  identity: null
