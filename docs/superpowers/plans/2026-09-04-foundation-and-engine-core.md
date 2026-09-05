@@ -497,8 +497,12 @@ describe("createExecFile", () => {
     expect(String(err)).toContain("magick");
   });
 
-  test("never passes a shell option through", () => {
-    let seenOptions: unknown = { shell: true };
+  test("strips shell:true when a caller actually passes it", () => {
+    // The caller MUST pass { shell: true } as the 4th argument. An earlier
+    // version of this test never passed options at all, so `safeOptions` was
+    // always {} and the assertion held even with the `delete` removed. A test
+    // that cannot fail is worse than no test.
+    let seenOptions: unknown;
     const spawn = (
       _c: string,
       _a: string[],
@@ -509,9 +513,55 @@ describe("createExecFile", () => {
       cb(null, "", "");
     };
     const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
-    execFile("magick", [], () => {});
+    execFile("magick", [], () => {}, { shell: true } as never);
     expect(seenOptions).toBeDefined();
     expect((seenOptions as { shell?: unknown }).shell).toBeUndefined();
+  });
+
+  test("preserves other options while stripping shell", () => {
+    let seenOptions: Record<string, unknown> | undefined;
+    const spawn = (
+      _c: string,
+      _a: string[],
+      cb: (e: null, o: string, s: string) => void,
+      opts?: unknown,
+    ) => {
+      seenOptions = opts as Record<string, unknown>;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
+    execFile("magick", [], () => {}, { shell: true, maxBuffer: 4096 } as never);
+    expect(seenOptions?.maxBuffer).toBe(4096);
+    expect(seenOptions?.shell).toBeUndefined();
+  });
+
+  test("reports a missing tool asynchronously, never in the same tick", async () => {
+    // Real child_process.execFile always calls back on a later tick. If the
+    // missing-tool path called back synchronously, consumers would see
+    // different ordering depending on whether a tool happened to exist.
+    const execFile = createExecFile({});
+    const order: string[] = [];
+    await new Promise<void>((resolve) => {
+      execFile("magick", [], (err) => {
+        order.push(err ? "callback" : "unexpected-success");
+        resolve();
+      });
+      order.push("after-call");
+    });
+    expect(order).toEqual(["after-call", "callback"]);
+  });
+
+  test("rejects a relative resolved path rather than trusting cwd", () => {
+    // toolchain.ts is supposed to only ever produce absolute paths. If a
+    // relative one leaks through, Node resolves it against cwd, which is a
+    // silent, cwd-dependent failure. Fail loudly instead.
+    const execFile = createExecFile({ magick: "bin/magick" });
+    let err: Error | null = null;
+    execFile("magick", [], (e) => {
+      err = e;
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("absolute");
   });
 });
 ```
@@ -527,6 +577,7 @@ Expected: FAIL, cannot resolve module `src/main/engine/exec`.
 
 ```ts
 import { execFile as nodeExecFile } from "node:child_process";
+import path from "node:path";
 import type { ExecFileFn } from "./types";
 
 /** Maps the bare command name a converter uses to its resolved absolute path. */
@@ -546,10 +597,23 @@ export function createExecFile(
 ): ExecFileFn {
   return (cmd, args, callback, options) => {
     const resolved = commands[cmd];
+
+    // Report failures on a later tick. Real execFile is always async, and a
+    // callback that is sometimes sync and sometimes async makes consumer
+    // ordering depend on whether a tool happens to be installed.
+    const fail = (message: string) => {
+      queueMicrotask(() => callback(new Error(message), "", ""));
+    };
+
     if (!resolved) {
-      callback(new Error(`Tool not available: ${cmd}`), "", "");
+      fail(`Tool not available: ${cmd}`);
       return;
     }
+    if (!path.isAbsolute(resolved)) {
+      fail(`Tool path must be absolute, got: ${resolved}`);
+      return;
+    }
+
     const safeOptions = { ...(options ?? {}) };
     delete (safeOptions as { shell?: unknown }).shell;
     return spawn(resolved, args, callback, safeOptions);
@@ -560,7 +624,7 @@ export function createExecFile(
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/exec.test.ts`
-Expected: PASS, 4 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1843,7 +1907,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 39 tests across 7 files: toolchain 7, exec 4, imagemagick 6, registry 8, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 42 tests across 7 files: toolchain 7, exec 7, imagemagick 6, registry 8, job 6, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
