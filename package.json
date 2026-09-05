@@ -7,7 +7,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "tsc --noEmit && electron-vite build",
+    "build": "tsc -b tsconfig.node.json tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
