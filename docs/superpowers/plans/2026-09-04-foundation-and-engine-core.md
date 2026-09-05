@@ -1735,6 +1735,15 @@ export interface ConverterApi {
   outputsFor(extension: string): Promise<string[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   reveal(path: string): Promise<void>;
+  /**
+   * Resolves a dropped File to its absolute path.
+   *
+   * Electron 32 REMOVED `File.path`, so a renderer cannot read it directly any
+   * more; `webUtils.getPathForFile` in the preload is the replacement. Typed as
+   * `unknown` rather than `File` because this file compiles under both the node
+   * and web tsconfig projects, and the node project has no DOM lib.
+   */
+  pathForFile(file: unknown): string;
 }
 ```
 
@@ -1876,7 +1885,7 @@ Note the dev-mode caveat: `enforceOffline` blocks the Vite dev server, which is 
 Replace the entire contents of `src/preload/index.ts`:
 
 ```ts
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC, type ConvertRequest, type ConverterApi } from "../shared/ipc";
 
 const api: ConverterApi = {
@@ -1884,6 +1893,9 @@ const api: ConverterApi = {
   outputsFor: (extension: string) => ipcRenderer.invoke(IPC.outputsFor, extension),
   run: (items: ConvertRequest[]) => ipcRenderer.invoke(IPC.run, items),
   reveal: (target: string) => ipcRenderer.invoke(IPC.reveal, target),
+  // `as never` avoids needing the DOM `File` type here: this file compiles
+  // under the node tsconfig project, which deliberately has no DOM lib.
+  pathForFile: (file: unknown) => webUtils.getPathForFile(file as never),
 };
 
 contextBridge.exposeInMainWorld("converter", api);
@@ -1966,7 +1978,10 @@ export function App() {
     event.preventDefault();
     const dropped = event.dataTransfer.files[0];
     if (!dropped) return;
-    const path = window.converter ? (dropped as File & { path: string }).path : "";
+    // Electron 32 removed File.path. Reading it here would silently yield
+    // undefined and drag-and-drop would never work, so go through the preload's
+    // webUtils bridge instead.
+    const path = window.converter.pathForFile(dropped);
     const extension = dropped.name.split(".").pop() ?? "";
     setFile({ path, name: dropped.name, extension });
     setResults([]);
@@ -2055,7 +2070,9 @@ createRoot(document.getElementById("root")!).render(<App />);
 Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
 Expected: `exit=0`.
 
-- [ ] **Step 5: Build and run the app for real**
+- [ ] **Step 5: Build and run the app for real** (MANUAL - a subagent cannot do this)
+
+This step needs a human at the keyboard: it involves launching a GUI and dragging a file onto a window. An automated worker should build, typecheck, and stop, leaving this for the user. Task 9 covers the same conversion path headlessly, so automated verification does not depend on this step.
 
 ImageMagick is not installed on this machine, so install it first:
 
@@ -2174,7 +2191,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 53 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 11, job 7, offline 6, integration 2.
+Expected: all suites pass. Total should be 58 tests across 7 files: toolchain 11, exec 12, imagemagick 6, registry 11, job 10, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
