@@ -32,8 +32,11 @@ describe.skipIf(!magick)("real conversion", () => {
   });
 
   test("reports a clear error for an unroutable pair", async () => {
+    // Not mp4: ImageMagick genuinely writes mp4 from image sequences, so that
+    // pair really does route and this test passed a real conversion instead of
+    // the error path. docx is reachable from nothing ImageMagick offers.
     const input = ensurePngFixture(magick!);
-    const results = await engine.runner.run([{ path: input, output: "mp4" }]);
+    const results = await engine.runner.run([{ path: input, output: "docx" }]);
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.error).toContain("No converter");
   });
