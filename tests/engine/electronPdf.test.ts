@@ -33,13 +33,18 @@ describe("electronPdf converter", () => {
   });
 
   test("writes exactly the bytes the renderer produced", async () => {
-    let written: Buffer | null = null;
+    // Collect into an array rather than a nullable single value: TypeScript's
+    // control-flow analysis does not track assignments made inside a closure,
+    // so a `let x: Buffer | null = null` would narrow to `never` at the
+    // assertion and fail the typecheck. An array sidesteps that without a cast.
+    const writes: Buffer[] = [];
     const exec: ExecFileFn = (_c, _a, cb) => cb(null, "", "");
     const render: PdfRenderer = async () => Buffer.from("%PDF-1.4 real bytes");
     await convert("/tmp/in.html", "html", "pdf", "/tmp/out.pdf", {}, exec, render, async (_p, data) => {
-      written = data;
+      writes.push(data);
     });
-    expect((written as Buffer | null)?.toString()).toBe("%PDF-1.4 real bytes");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.toString()).toBe("%PDF-1.4 real bytes");
   });
 
   test("surfaces a renderer failure rather than writing a truncated file", async () => {
