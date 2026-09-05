@@ -17,13 +17,23 @@ import { toCommandMap, toFfmpegExecFile } from "./exec";
  * Input formats ffmpeg should own outright. Upstream's category keys cannot be
  * used for this: ImageMagick lists mp4 under "images" and ffmpeg lists
  * everything under "muxer", so the medium classification has to be ours.
+ *
+ * Every entry must appear in ffmpeg's own `from` table - a format ffmpeg cannot
+ * read can never route to it, so a dead entry only implies coverage that does
+ * not exist. tests/engine/routing.test.ts enforces this against the real table.
+ *
+ * Deliberately absent: `wmv` and `ts`. ffmpeg's lifted table lists them as
+ * OUTPUT formats only, so ffmpeg is never a candidate for them as input. `.wmv`
+ * currently routes to ImageMagick; `.ts` is readable by neither converter and
+ * so cannot be converted at all. Both are coverage gaps inherited from
+ * upstream's tables, not routing bugs, and are recorded in the plan.
  */
-const MEDIA_INPUTS = new Set([
-  "mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "3gp", "ts",
+export const MEDIA_INPUTS = new Set([
+  "mp4", "mov", "mkv", "avi", "webm", "flv", "m4v", "mpg", "mpeg", "3gp", "3g2",
   "mp3", "wav", "flac", "aac", "ogg", "opus", "m4a", "wma", "aiff",
 ]);
 
-const CONVERTERS: Record<string, ConverterEntry> = {
+export const CONVERTERS: Record<string, ConverterEntry> = {
   // ffmpeg wins when the INPUT is a video or audio container, and yields on
   // stills. A constant would be wrong in both directions: ranking it above
   // ImageMagick reroutes png -> jpg through ffmpeg, and ranking it below sends
