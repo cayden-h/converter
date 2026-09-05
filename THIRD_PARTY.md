@@ -17,5 +17,6 @@ is the relative import path for `ExecFileFn`.
 - `src/main/engine/converters/pandoc.ts` from `src/converters/pandoc.ts`
 - `src/main/engine/converters/resvg.ts` from `src/converters/resvg.ts`
 - `src/main/engine/converters/dasel.ts` from `src/converters/dasel.ts`
+- `src/main/engine/converters/potrace.ts` from `src/converters/potrace.ts`
 
 Because this code is reused, this project is licensed AGPL-3.0-or-later.
