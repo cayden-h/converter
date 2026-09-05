@@ -104,6 +104,62 @@ describe("createExecFile", () => {
     expect(err).toBeInstanceOf(Error);
     expect(String(err)).toContain("absolute");
   });
+
+  test("strips encoding:buffer so the string callback contract holds", () => {
+    // Node picks Buffer vs string from options.encoding at runtime, so no type
+    // assertion can keep this honest. It has to be enforced here.
+    let seenOptions: Record<string, unknown> | undefined;
+    const spawn = (
+      _c: string,
+      _a: string[],
+      cb: (e: null, o: string, s: string) => void,
+      opts?: unknown,
+    ) => {
+      seenOptions = opts as Record<string, unknown>;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
+    execFile("magick", [], () => {}, { encoding: "buffer" } as never);
+    expect(seenOptions?.encoding).toBeUndefined();
+  });
+
+  test("preserves a legitimate encoding", () => {
+    let seenOptions: Record<string, unknown> | undefined;
+    const spawn = (
+      _c: string,
+      _a: string[],
+      cb: (e: null, o: string, s: string) => void,
+      opts?: unknown,
+    ) => {
+      seenOptions = opts as Record<string, unknown>;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
+    execFile("magick", [], () => {}, { encoding: "utf8" } as never);
+    expect(seenOptions?.encoding).toBe("utf8");
+  });
+
+  test("applies a generous default maxBuffer that a caller can still override", () => {
+    // Lifted converters never set options, so without a default they inherit
+    // node's 1MB limit and large conversions fail as truncated pipes.
+    let seenOptions: Record<string, unknown> | undefined;
+    const spawn = (
+      _c: string,
+      _a: string[],
+      cb: (e: null, o: string, s: string) => void,
+      opts?: unknown,
+    ) => {
+      seenOptions = opts as Record<string, unknown>;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
+
+    execFile("magick", [], () => {});
+    expect(seenOptions?.maxBuffer).toBe(64 * 1024 * 1024);
+
+    execFile("magick", [], () => {}, { maxBuffer: 123 } as never);
+    expect(seenOptions?.maxBuffer).toBe(123);
+  });
 });
 
 describe("toCommandMap", () => {
