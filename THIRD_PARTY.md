@@ -11,6 +11,7 @@ practical so that upstream fixes can be pulled. The only permitted local change
 is the relative import path for `ExecFileFn`.
 
 - `src/main/engine/converters/imagemagick.ts` from `src/converters/imagemagick.ts`
+- `src/main/engine/converters/ffmpeg.ts` from `src/converters/ffmpeg.ts` (no local change)
 - `src/main/engine/normalizeFiletype.ts` from `src/helpers/normalizeFiletype.ts`
 - `src/main/engine/types.ts` from `src/converters/types.ts`
 

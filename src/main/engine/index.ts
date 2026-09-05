@@ -1,5 +1,6 @@
 import path from "node:path";
 import { convert as convertImagemagick, properties as propertiesImagemagick } from "./converters/imagemagick";
+import { convert as convertFfmpeg, properties as propertiesFfmpeg } from "./converters/ffmpeg";
 import { JobRunner } from "./job";
 import { buildRegistry, type ConverterEntry, type Registry } from "./registry";
 import {
@@ -9,9 +10,37 @@ import {
   type ToolName,
   type Toolchain,
 } from "./toolchain";
-import { toCommandMap } from "./exec";
+import { toCommandMap, toFfmpegExecFile } from "./exec";
+
+/**
+ * Input formats ffmpeg should own outright. Upstream's category keys cannot be
+ * used for this: ImageMagick lists mp4 under "images" and ffmpeg lists
+ * everything under "muxer", so the medium classification has to be ours.
+ */
+const MEDIA_INPUTS = new Set([
+  "mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "3gp", "ts",
+  "mp3", "wav", "flac", "aac", "ogg", "opus", "m4a", "wma", "aiff",
+]);
 
 const CONVERTERS: Record<string, ConverterEntry> = {
+  // ffmpeg wins when the INPUT is a video or audio container, and yields on
+  // stills. A constant would be wrong in both directions: ranking it above
+  // ImageMagick reroutes png -> jpg through ffmpeg, and ranking it below sends
+  // mp4 -> gif to ImageMagick, whose mp4 delegate is frequently broken.
+  ffmpeg: {
+    tool: "ffmpeg",
+    priority: (input: string) => (MEDIA_INPUTS.has(input) ? 30 : 5),
+    properties: propertiesFfmpeg,
+    convert: (filePath, fileType, convertTo, targetPath, options, execFileOverride) =>
+      convertFfmpeg(
+        filePath,
+        fileType,
+        convertTo,
+        targetPath,
+        options,
+        execFileOverride ? (toFfmpegExecFile(execFileOverride) as never) : undefined,
+      ),
+  },
   imagemagick: {
     tool: "imagemagick",
     priority: 10,
