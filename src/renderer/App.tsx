@@ -1,18 +1,43 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ConvertResult, FormatGroup, ToolStatus } from "../shared/ipc";
+import type { FormatGroup, ProgressUpdate, ToolStatus } from "../shared/ipc";
 import { DropZone } from "./components/DropZone";
 import { FileRow } from "./components/FileRow";
 import { FormatPicker } from "./components/FormatPicker";
+import { ResultRow, type RowStatus } from "./components/ResultRow";
 import { computeFormatAvailability } from "./formatAvailability";
 import { useFiles } from "./useFiles";
+
+interface RowState {
+  status: RowStatus;
+  error?: string;
+  outputPath?: string;
+}
 
 export function App() {
   const [tools, setTools] = useState<ToolStatus[]>([]);
   const { files, add, remove, clear } = useFiles();
   const [perFileGroups, setPerFileGroups] = useState<FormatGroup[][]>([]);
   const [target, setTarget] = useState("");
-  const [results, setResults] = useState<ConvertResult[]>([]);
+  const [rows, setRows] = useState<Map<string, RowState>>(new Map());
   const [busy, setBusy] = useState(false);
+
+  // Subscribe once for the component's lifetime. Re-subscribing on every
+  // render (or every batch) would stack listeners, so each progress event
+  // would update rows multiple times.
+  useEffect(() => {
+    const unsubscribe = window.converter.onProgress((update: ProgressUpdate) => {
+      if (update.status === "running") {
+        setRows((prev) => new Map(prev).set(update.path, { status: "converting" }));
+      } else if (update.status === "failed") {
+        setRows((prev) =>
+          new Map(prev).set(update.path, { status: "failed", error: update.error }),
+        );
+      }
+      // "done" is left for the final result merge in onConvert, which also
+      // carries the outputPath the engine's progress event does not include.
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     window.converter.detectTools().then(setTools);
@@ -66,8 +91,29 @@ export function App() {
   const onConvert = async () => {
     if (files.length === 0 || !target) return;
     setBusy(true);
-    setResults(await window.converter.run(files.map((file) => ({ path: file.path, output: target }))));
+    setRows(new Map(files.map((file) => [file.id, { status: "queued" as RowStatus }])));
+    const results = await window.converter.run(
+      files.map((file) => ({ path: file.path, output: target })),
+    );
+    // The final results are authoritative: they carry the outputPath a "done"
+    // progress event doesn't, and they are the only signal at all for files
+    // that never ran (e.g. cancelled while still queued) - keying by full
+    // input path, never basename, so same-named files from different
+    // directories cannot collide.
+    setRows((prev) => {
+      const next = new Map(prev);
+      for (const result of results) {
+        next.set(result.path, result.ok
+          ? { status: "done", outputPath: result.outputPath }
+          : { status: "failed", error: result.error });
+      }
+      return next;
+    });
     setBusy(false);
+  };
+
+  const onCancel = () => {
+    window.converter.cancel();
   };
 
   return (
@@ -78,14 +124,28 @@ export function App() {
 
       {files.length > 0 && (
         <ul className="flex flex-col gap-2 overflow-y-auto">
-          {files.map((file) => (
-            <FileRow
-              key={file.id}
-              name={file.name}
-              extension={file.extension}
-              onRemove={() => remove(file.id)}
-            />
-          ))}
+          {files.map((file) => {
+            const row = rows.get(file.id);
+            return row ? (
+              <ResultRow
+                key={file.id}
+                name={file.name}
+                extension={file.extension}
+                status={row.status}
+                error={row.error}
+                outputPath={row.outputPath}
+                onReveal={() => window.converter.reveal(row.outputPath!)}
+                onOpen={() => window.converter.openPath(row.outputPath!)}
+              />
+            ) : (
+              <FileRow
+                key={file.id}
+                name={file.name}
+                extension={file.extension}
+                onRemove={() => remove(file.id)}
+              />
+            );
+          })}
         </ul>
       )}
 
@@ -95,37 +155,26 @@ export function App() {
           <FormatPicker perFileGroups={perFileGroups} value={target} onChange={setTarget} />
           <div className="flex items-center gap-3">
             <button
-              onClick={onConvert}
-              disabled={busy || !target}
+              onClick={busy ? onCancel : onConvert}
+              disabled={!busy && !target}
               className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {busy ? "Converting..." : "Convert"}
+              {busy ? "Cancel" : "Convert"}
             </button>
-            <button type="button" onClick={clear} className="text-sm text-muted hover:text-ink">
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                setRows(new Map());
+              }}
+              disabled={busy}
+              className="text-sm text-muted hover:text-ink disabled:opacity-50"
+            >
               Clear
             </button>
           </div>
         </section>
       )}
-
-      {results.map((result) => (
-        <p key={result.path} className="text-sm text-ink">
-          {result.ok ? (
-            <>
-              Done: {result.outputPath}{" "}
-              <button
-                type="button"
-                onClick={() => window.converter.reveal(result.outputPath!)}
-                className="text-accent underline"
-              >
-                Reveal
-              </button>
-            </>
-          ) : (
-            <>Failed: {result.error}</>
-          )}
-        </p>
-      ))}
 
       <details className="mt-auto text-sm text-muted">
         <summary>Formats</summary>

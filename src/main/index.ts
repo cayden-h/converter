@@ -68,6 +68,11 @@ app.whenReady().then(() => {
     shell.showItemInFolder(target);
   });
 
+  ipcMain.handle(IPC.openPath, async (_event, target: string) => {
+    const error = await shell.openPath(target);
+    if (error) throw new Error(error);
+  });
+
   ipcMain.handle(IPC.openFiles, async () => {
     if (!mainWindow) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
