@@ -231,4 +231,56 @@ describe("JobRunner", () => {
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.error).toMatch(/no output|not (?:be )?(?:created|written)/i);
   });
+
+  test("names a compound output by its real extension, not the codec prefix", async () => {
+    // ffmpeg advertises av1.mp4, h265.mkv and friends: the prefix selects a
+    // codec, the suffix is the container. Naming the file from the whole
+    // string would produce clip.av1.mp4.
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "ffmpeg",
+          priority: 20,
+          properties: { from: { video: ["mov"] }, to: { video: ["av1.mp4"] } },
+          convert: async () => "Done",
+        },
+      },
+      { ffmpeg: "/bin/ffmpeg" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { ffmpeg: "/bin/ffmpeg" },
+      outputDirFor: () => "/out",
+      outputExists: () => true,
+    });
+    const results = await runner.run([{ path: "/in/clip.mov", output: "av1.mp4" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    expect(results[0]?.outputPath).toBe("/out/clip.mp4");
+  });
+
+  test("passes the full compound format to the converter, not just the container", async () => {
+    // The codec prefix is how ffmpeg knows to use libaom-av1. Stripping it
+    // before calling convert() would silently produce the default codec.
+    let seenConvertTo = "";
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "ffmpeg",
+          priority: 20,
+          properties: { from: { video: ["mov"] }, to: { video: ["av1.mp4"] } },
+          convert: async (_f, _t, convertTo) => {
+            seenConvertTo = convertTo;
+            return "Done";
+          },
+        },
+      },
+      { ffmpeg: "/bin/ffmpeg" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { ffmpeg: "/bin/ffmpeg" },
+      outputDirFor: () => "/out",
+      outputExists: () => true,
+    });
+    await runner.run([{ path: "/in/clip.mov", output: "av1.mp4" }]);
+    expect(seenConvertTo).toBe("av1.mp4");
+  });
 });
