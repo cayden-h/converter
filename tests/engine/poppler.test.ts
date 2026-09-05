@@ -52,8 +52,9 @@ describe("poppler converter", () => {
       cb(null, "", "");
     };
     await convert("/tmp/in.pdf", "pdf", "png", "/tmp/out.png", {}, mock);
-    expect(seen).toContain("-f");
-    expect(seen).toContain("-l");
+    const first = seen.indexOf("-f");
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(seen.slice(first, first + 4)).toEqual(["-f", "1", "-l", "1"]);
   });
 
   test("rejects an unsupported target", async () => {

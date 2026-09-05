@@ -68,19 +68,17 @@ describe.skipIf(!engine.toolchain.ffmpeg)("real ffmpeg conversion", () => {
     expect(Buffer.from(header).toString()).toBe("GIF");
   });
 
-  test("converts mp4 to mp3 audio", async () => {
+  test("converts mp4 to mp3 and writes real audio", async () => {
     const input = ensureVideoFixture(engine.toolchain.ffmpeg!);
     const runner = createEngine("/nonexistent-bundle-dir").runner;
     runner.options = { ...runner.options, outputDirFor: () => outDir };
     const results = await runner.run([{ path: input, output: "mp3" }]);
-    // The generated fixture has no audio track, so ffmpeg is expected to fail
-    // here. What matters is that it fails HONESTLY rather than reporting a
-    // success with no file - the exact bug Plan 1 fixed.
-    if (results[0]?.ok) {
-      expect(existsSync(results[0].outputPath!)).toBe(true);
-    } else {
-      expect(results[0]?.error).toBeTruthy();
-    }
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    // An MP3 starts with either an ID3 tag or an MPEG frame sync (0xFF 0xEx/0xFx).
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 3);
+    const isId3 = header.toString("latin1", 0, 3) === "ID3";
+    const isFrameSync = header[0] === 0xff && (header[1]! & 0xe0) === 0xe0;
+    expect(isId3 || isFrameSync, `unexpected header: ${[...header]}`).toBe(true);
   });
 });
 
