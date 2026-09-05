@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { shouldRelocate, rewriteTarget, planClosure } from "../../scripts/vendor-binaries";
+import { shouldRelocate, rewriteTarget, planClosure, parseConfigurePaths } from "../../scripts/vendor-binaries";
 
 describe("shouldRelocate", () => {
   test("relocates homebrew paths", () => {
@@ -60,5 +60,33 @@ describe("planClosure", () => {
   test("keeps executables separate from libraries", () => {
     const result = planClosure(["/opt/homebrew/bin/tool"], (p) => graph[p] ?? []);
     expect(result.executables).toEqual(["/opt/homebrew/bin/tool"]);
+  });
+});
+
+describe("parseConfigurePaths", () => {
+  // Real `magick -list configure` output, trimmed to the relevant rows. The
+  // version segment (7.1.2-31 here) changes with every Homebrew upgrade,
+  // which is exactly why this is parsed rather than hardcoded.
+  const output = `Path: /opt/homebrew/Cellar/imagemagick/7.1.2-31/lib/ImageMagick//config-Q16HDRI/configure.xml
+
+Name                  Value
+-------------------------------------------------------------------------------
+CODER_PATH            /opt/homebrew/Cellar/imagemagick/7.1.2-31/lib/ImageMagick/modules-Q16HDRI/coders
+CONFIGURE_PATH        /opt/homebrew/Cellar/imagemagick/7.1.2-31/etc/ImageMagick-7/
+`;
+
+  test("extracts both paths", () => {
+    expect(parseConfigurePaths(output)).toEqual({
+      coderPath: "/opt/homebrew/Cellar/imagemagick/7.1.2-31/lib/ImageMagick/modules-Q16HDRI/coders",
+      configurePath: "/opt/homebrew/Cellar/imagemagick/7.1.2-31/etc/ImageMagick-7",
+    });
+  });
+
+  test("strips the trailing slash CONFIGURE_PATH is emitted with", () => {
+    expect(parseConfigurePaths(output).configurePath.endsWith("/")).toBe(false);
+  });
+
+  test("throws when the expected rows are missing", () => {
+    expect(() => parseConfigurePaths("Name  Value\n")).toThrow();
   });
 });

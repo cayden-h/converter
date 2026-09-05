@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,6 +58,50 @@ export function planClosure(roots: string[], readDeps: (p: string) => string[]):
   return { executables: [...roots], libraries: [...libraries] };
 }
 
+/**
+ * Parses the `CODER_PATH` and `CONFIGURE_PATH` lines out of
+ * `magick -list configure`'s output.
+ *
+ * ImageMagick is built `--with-modules`, so every format coder is a separate
+ * `.so` dlopen'd at runtime from a path compiled in at build time, and its
+ * XML configuration is read from a second compiled-in path. Neither shows up
+ * in `otool -L`, so they must be located and vendored separately from the
+ * dylib closure. The version segment in both paths changes with every
+ * Homebrew upgrade, so it is parsed here rather than hardcoded.
+ */
+export function parseConfigurePaths(output: string): { coderPath: string; configurePath: string } {
+  const coderMatch = output.match(/^CODER_PATH\s+(.+)$/m);
+  const configureMatch = output.match(/^CONFIGURE_PATH\s+(.+)$/m);
+  if (!coderMatch || !configureMatch) {
+    throw new Error("could not parse CODER_PATH / CONFIGURE_PATH from `magick -list configure`");
+  }
+  // CONFIGURE_PATH is emitted with a trailing slash; CODER_PATH is not.
+  // Normalize both so callers don't need to care.
+  return {
+    coderPath: coderMatch[1]!.trim().replace(/\/+$/, ""),
+    configurePath: configureMatch[1]!.trim().replace(/\/+$/, ""),
+  };
+}
+
+/**
+ * Relocates one ImageMagick coder module in place: makes it writable,
+ * rewrites every Homebrew reference to `@executable_path/../lib/<name>`, and
+ * ad-hoc signs it. `@executable_path` is correct even though the coder sits
+ * two directories below `bin/`, because it resolves relative to the
+ * executable that dlopen's the module (`bin/magick`), not to the module
+ * itself - `@loader_path` would resolve relative to the `.so` and be wrong.
+ */
+export function relocateCoderModule(file: string): void {
+  chmodSync(file, 0o644 | 0o200);
+  const deps = readDepsFrom(file);
+  for (const dep of deps) {
+    if (shouldRelocate(dep)) {
+      execFileSync("install_name_tool", ["-change", dep, rewriteTarget(dep), file]);
+    }
+  }
+  execFileSync("codesign", ["--force", "--sign", "-", file]);
+}
+
 export function readDepsFrom(binary: string): string[] {
   const output = execFileSync("otool", ["-L", binary], { encoding: "utf8" });
   return output
@@ -89,7 +133,26 @@ function main(): void {
     return realpathSync(resolved);
   });
 
-  const plan = planClosure(roots, (p) => readDepsFrom(realpathSync(p)));
+  // ImageMagick's coder modules must SEED the closure, not merely be copied
+  // afterwards. They are dlopen'd, so `otool -L magick` never mentions them -
+  // and crucially each coder has its OWN dependencies that magick itself does
+  // not link. Seeding only the executables left libjpeg, libheif, libtiff and
+  // the three webp libraries out of the bundle entirely, and ltdl reported the
+  // resulting load failure as a misleading "file not found" on the .la file.
+  const { coderPath, configurePath } = parseConfigurePaths(
+    execFileSync("magick", ["-list", "configure"], { encoding: "utf8" }),
+  );
+  const coderRoots = existsSync(coderPath)
+    ? readdirSync(coderPath)
+        .filter((entry) => entry.endsWith(".so"))
+        .map((entry) => path.join(coderPath, entry))
+    : [];
+
+  const plan = planClosure([...roots, ...coderRoots], (p) => readDepsFrom(realpathSync(p)));
+
+  // The coders live in their own directory, not bin/. They were added only as
+  // closure seeds, so drop them before executables get copied.
+  plan.executables = plan.executables.filter((file) => !file.endsWith(".so"));
 
   // Two different otool -L references can resolve to the same physical
   // library through different symlink paths (e.g. /opt/homebrew/lib/x.dylib
@@ -139,10 +202,40 @@ function main(): void {
     execFileSync("codesign", ["--force", "--sign", "-", file]);
   }
 
+  // ImageMagick loads format coders as separate .so modules dlopen'd from a
+  // path compiled in at build time, and reads its XML configuration from a
+  // second compiled-in path. Neither appears in the dylib closure above, so
+  // the bundled magick would otherwise run, report its version correctly,
+  // and know zero formats. Locate both paths from the tool itself rather
+  // than hardcoding the ImageMagick version, which changes on every
+  // Homebrew upgrade.
+  const magickBinary = destToSource.has(path.join(binDir, "magick")) ? path.join(binDir, "magick") : undefined;
+  let coderCount = 0;
+  if (magickBinary) {
+    const coderDestDir = path.join(libDir, "ImageMagick", "modules-Q16HDRI", "coders");
+    const configureDestDir = path.join(bundleRoot, "etc", "ImageMagick-7");
+    mkdirSync(path.dirname(coderDestDir), { recursive: true });
+    mkdirSync(path.dirname(configureDestDir), { recursive: true });
+
+    cpSync(coderPath, coderDestDir, { recursive: true });
+    cpSync(configurePath, configureDestDir, { recursive: true });
+
+    const coderFiles = readdirSync(coderDestDir)
+      .filter((name) => name.endsWith(".so"))
+      .map((name) => path.join(coderDestDir, name));
+    for (const coderFile of coderFiles) {
+      relocateCoderModule(coderFile);
+    }
+    coderCount = coderFiles.length;
+  }
+
   const totalBytes = copiedFiles.reduce((sum, file) => sum + statSync(file).size, 0);
   console.log(`Vendored ${copiedFiles.length} files, ${formatBytes(totalBytes)} total.`);
   console.log(`  executables: ${plan.executables.length}`);
   console.log(`  libraries:   ${libraryDests.size}`);
+  if (magickBinary) {
+    console.log(`  ImageMagick coders: ${coderCount}`);
+  }
 }
 
 const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
