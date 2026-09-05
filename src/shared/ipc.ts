@@ -21,12 +21,19 @@ export interface FormatGroup {
   formats: string[];
 }
 
+export interface ProgressUpdate {
+  path: string;
+  status: "running" | "done" | "failed";
+  error?: string;
+}
+
 export const IPC = {
   detectTools: "converter:detectTools",
   outputsFor: "converter:outputsFor",
   groupedOutputsFor: "converter:groupedOutputsFor",
   run: "converter:run",
   reveal: "converter:reveal",
+  progress: "converter:progress",
 } as const;
 
 export interface ConverterApi {
@@ -35,6 +42,8 @@ export interface ConverterApi {
   groupedOutputsFor(extension: string): Promise<FormatGroup[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   reveal(path: string): Promise<void>;
+  /** Subscribe to conversion progress. Returns an unsubscribe function. */
+  onProgress(handler: (update: ProgressUpdate) => void): () => void;
   /**
    * Resolves a dropped File to its absolute path.
    *

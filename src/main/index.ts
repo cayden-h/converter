@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEngine } from "./engine";
 import { enforceOffline } from "./offline";
+import { forwardProgress } from "./progress";
 import { KNOWN_TOOLS, type ToolName } from "./engine/toolchain";
 import { IPC, type ConvertRequest } from "../shared/ipc";
 
@@ -12,6 +13,8 @@ const bundleDir = app.isPackaged
   : path.join(dirname, "../../resources/bin");
 
 const engine = createEngine(bundleDir);
+
+let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -32,6 +35,8 @@ function createWindow(): void {
   } else {
     window.loadFile(path.join(dirname, "../renderer/index.html"));
   }
+
+  mainWindow = window;
 }
 
 app.whenReady().then(() => {
@@ -58,6 +63,8 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.reveal, (_event, target: string) => {
     shell.showItemInFolder(target);
   });
+
+  forwardProgress(engine.runner, () => mainWindow);
 
   createWindow();
 });
