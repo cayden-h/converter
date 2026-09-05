@@ -196,9 +196,15 @@ export function resolveTool(name: ToolName, options: ResolveOptions): string | n
   const wanted = options.binary ?? spec.binary;
   if (!spec.binaries.includes(wanted)) return null;
 
+  // The vendoring script lays out each bundled tool as bin/<exe> beside a
+  // sibling lib/ directory (scripts/vendor-binaries.ts). Relocated binaries
+  // reference their dylibs as @executable_path/../lib/<name>, which only
+  // resolves when lib/ is a sibling of the directory holding the executable -
+  // so the bundled candidate must include that bin/ segment.
   const bundled = join(
     options.bundleDir,
     `${options.platform}-${options.arch}`,
+    "bin",
     `${wanted}${ext}`,
   );
   if (exists(bundled)) return bundled;

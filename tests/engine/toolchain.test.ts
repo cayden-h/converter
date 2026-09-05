@@ -11,14 +11,27 @@ import { toCommandMap } from "../../src/main/engine/exec";
 
 describe("resolveTool", () => {
   test("returns the bundled path when the bundled binary exists", () => {
-    const exists = (p: string) => p === "/bundle/bin/darwin-arm64/magick";
+    const exists = (p: string) => p === "/bundle/bin/darwin-arm64/bin/magick";
     const result = resolveTool("imagemagick", {
       platform: "darwin",
       arch: "arm64",
       bundleDir: "/bundle/bin",
       exists,
     });
-    expect(result).toBe("/bundle/bin/darwin-arm64/magick");
+    expect(result).toBe("/bundle/bin/darwin-arm64/bin/magick");
+  });
+
+  test("prefers a bundled binary over an identically named system one", () => {
+    // The whole point of vendoring. If the system path wins, the packaged app
+    // silently uses whatever Homebrew happens to have - or nothing at all on a
+    // machine without it.
+    const result = resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/app/resources/bin",
+      exists: () => true,
+    });
+    expect(result).toBe("/app/resources/bin/darwin-arm64/bin/magick");
   });
 
   test("falls back to a known system path when not bundled", () => {
@@ -56,7 +69,7 @@ describe("resolveTool", () => {
         return false;
       },
     });
-    expect(seen[0]).toBe("C:\\app\\bin\\win32-x64\\magick.exe");
+    expect(seen[0]).toBe("C:\\app\\bin\\win32-x64\\bin\\magick.exe");
   });
 
   test("builds the darwin bundled path with forward slashes and no suffix", () => {
@@ -70,7 +83,7 @@ describe("resolveTool", () => {
         return false;
       },
     });
-    expect(seen[0]).toBe("/bundle/bin/darwin-arm64/magick");
+    expect(seen[0]).toBe("/bundle/bin/darwin-arm64/bin/magick");
   });
 
   test("prefers the bundled binary over a system one", () => {
@@ -80,7 +93,7 @@ describe("resolveTool", () => {
       bundleDir: "/bundle/bin",
       exists: () => true,
     });
-    expect(result).toBe("/bundle/bin/darwin-arm64/magick");
+    expect(result).toBe("/bundle/bin/darwin-arm64/bin/magick");
   });
 
   test("every known tool declares a binary name", () => {
