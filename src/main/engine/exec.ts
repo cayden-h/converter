@@ -1,4 +1,5 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import path from "node:path";
 import type { ExecFileFn } from "./types";
 
 /** Maps the bare command name a converter uses to its resolved absolute path. */
@@ -18,10 +19,23 @@ export function createExecFile(
 ): ExecFileFn {
   return (cmd, args, callback, options) => {
     const resolved = commands[cmd];
+
+    // Report failures on a later tick. Real execFile is always async, and a
+    // callback that is sometimes sync and sometimes async makes consumer
+    // ordering depend on whether a tool happens to be installed.
+    const fail = (message: string) => {
+      queueMicrotask(() => callback(new Error(message), "", ""));
+    };
+
     if (!resolved) {
-      callback(new Error(`Tool not available: ${cmd}`), "", "");
+      fail(`Tool not available: ${cmd}`);
       return;
     }
+    if (!path.isAbsolute(resolved)) {
+      fail(`Tool path must be absolute, got: ${resolved}`);
+      return;
+    }
+
     const safeOptions = { ...(options ?? {}) };
     delete (safeOptions as { shell?: unknown }).shell;
     return spawn(resolved, args, callback, safeOptions);
