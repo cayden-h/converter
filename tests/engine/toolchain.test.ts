@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { resolveTool, KNOWN_TOOLS } from "../../src/main/engine/toolchain";
+import {
+  resolveTool,
+  detectToolchain,
+  isSupportedPlatform,
+  KNOWN_TOOLS,
+} from "../../src/main/engine/toolchain";
 
 describe("resolveTool", () => {
   test("returns the bundled path when the bundled binary exists", () => {
@@ -79,5 +84,53 @@ describe("resolveTool", () => {
     for (const [name, spec] of Object.entries(KNOWN_TOOLS)) {
       expect(spec.binary, `${name} must declare a binary`).toBeTruthy();
     }
+  });
+
+  test("tries the second system path when the first is absent", () => {
+    // Without this, code that ignored `exists` and always returned
+    // systemPaths[0], or that iterated in reverse, would still pass every
+    // other test in this file. This is the only case that exercises the loop
+    // past its first iteration.
+    const result = resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/usr/local/bin/magick",
+    });
+    expect(result).toBe("/usr/local/bin/magick");
+  });
+});
+
+describe("detectToolchain", () => {
+  test("omits tools that did not resolve rather than storing null", () => {
+    // exec.ts does a truthy check on these entries, so an unresolved tool must
+    // be ABSENT from the map, not present with a null value.
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/ffmpeg",
+    });
+    expect(toolchain).toEqual({ ffmpeg: "/opt/homebrew/bin/ffmpeg" });
+    expect("imagemagick" in toolchain).toBe(false);
+  });
+
+  test("resolves every known tool when all are present", () => {
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: () => true,
+    });
+    expect(Object.keys(toolchain).sort()).toEqual(Object.keys(KNOWN_TOOLS).sort());
+  });
+});
+
+describe("isSupportedPlatform", () => {
+  test("accepts darwin and win32, rejects everything else", () => {
+    expect(isSupportedPlatform("darwin")).toBe(true);
+    expect(isSupportedPlatform("win32")).toBe(true);
+    expect(isSupportedPlatform("linux")).toBe(false);
+    expect(isSupportedPlatform("Darwin")).toBe(false);
   });
 });

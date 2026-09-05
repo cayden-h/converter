@@ -52,8 +52,15 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
 };
 
+/** The only platforms this app resolves tools for. Linux is out of scope. */
+export type SupportedPlatform = "darwin" | "win32";
+
+export function isSupportedPlatform(platform: string): platform is SupportedPlatform {
+  return platform === "darwin" || platform === "win32";
+}
+
 export interface ResolveOptions {
-  platform: string;
+  platform: SupportedPlatform;
   arch: string;
   bundleDir: string;
   exists?: (p: string) => boolean;
