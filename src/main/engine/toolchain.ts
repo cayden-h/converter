@@ -2,7 +2,15 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-export type ToolName = "imagemagick" | "ffmpeg" | "ffprobe" | "poppler" | "pandoc";
+export type ToolName =
+  | "imagemagick"
+  | "ffmpeg"
+  | "ffprobe"
+  | "poppler"
+  | "pandoc"
+  | "resvg"
+  | "dasel"
+  | "potrace";
 
 export interface ToolSpec {
   /** Primary executable name, without extension. Also the CommandMap key. */
@@ -61,6 +69,30 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
     systemPaths: {
       darwin: ["/opt/homebrew/bin/pandoc", "/usr/local/bin/pandoc"],
       win32: ["C:\\Program Files\\Pandoc\\pandoc.exe"],
+    },
+  },
+  resvg: {
+    binary: "resvg",
+    binaries: ["resvg"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/resvg", "/usr/local/bin/resvg"],
+      win32: ["C:\\Program Files\\resvg\\resvg.exe"],
+    },
+  },
+  dasel: {
+    binary: "dasel",
+    binaries: ["dasel"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/dasel", "/usr/local/bin/dasel"],
+      win32: ["C:\\Program Files\\dasel\\dasel.exe"],
+    },
+  },
+  potrace: {
+    binary: "potrace",
+    binaries: ["potrace"],
+    systemPaths: {
+      darwin: ["/opt/homebrew/bin/potrace", "/usr/local/bin/potrace"],
+      win32: ["C:\\Program Files\\potrace\\potrace.exe"],
     },
   },
 };

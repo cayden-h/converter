@@ -7,6 +7,7 @@ import {
   resolveDetectable,
   DETECTABLE_TOOLS,
 } from "../../src/main/engine/toolchain";
+import { toCommandMap } from "../../src/main/engine/exec";
 
 describe("resolveTool", () => {
   test("returns the bundled path when the bundled binary exists", () => {
@@ -176,6 +177,37 @@ describe("multi-binary tool suites", () => {
     for (const [name, spec] of Object.entries(KNOWN_TOOLS)) {
       expect(spec.binaries[0], `${name} must list a primary binary first`).toBe(spec.binary);
     }
+  });
+});
+
+describe("documents, data and vector tools", () => {
+  test("resolves the tools added for documents, data and vector", () => {
+    for (const [name, binary] of [
+      ["resvg", "resvg"],
+      ["dasel", "dasel"],
+      ["potrace", "potrace"],
+    ] as const) {
+      const result = resolveTool(name, {
+        platform: "darwin",
+        arch: "arm64",
+        bundleDir: "/nonexistent",
+        exists: (p) => p === `/opt/homebrew/bin/${binary}`,
+      });
+      expect(result, `${name} should resolve`).toBe(`/opt/homebrew/bin/${binary}`);
+    }
+  });
+
+  test("toCommandMap emits the new tools so converters can call them", () => {
+    // resvg.ts calls execFile("resvg", ...) by bare name. Without a CommandMap
+    // entry the lookup misses and every conversion reports the tool missing.
+    const commands = toCommandMap({
+      resvg: "/opt/homebrew/bin/resvg",
+      dasel: "/opt/homebrew/bin/dasel",
+      potrace: "/opt/homebrew/bin/potrace",
+    });
+    expect(commands.resvg).toBe("/opt/homebrew/bin/resvg");
+    expect(commands.dasel).toBe("/opt/homebrew/bin/dasel");
+    expect(commands.potrace).toBe("/opt/homebrew/bin/potrace");
   });
 });
 

@@ -39,7 +39,7 @@ export const CONVERTERS: Record<string, ConverterEntry> = {
   // ImageMagick reroutes png -> jpg through ffmpeg, and ranking it below sends
   // mp4 -> gif to ImageMagick, whose mp4 delegate is frequently broken.
   ffmpeg: {
-    tool: "ffmpeg",
+    tools: ["ffmpeg"],
     priority: (input: string) => (MEDIA_INPUTS.has(input) ? 30 : 5),
     properties: propertiesFfmpeg,
     convert: (filePath, fileType, convertTo, targetPath, options, execFileOverride) =>
@@ -53,7 +53,7 @@ export const CONVERTERS: Record<string, ConverterEntry> = {
       ),
   },
   imagemagick: {
-    tool: "imagemagick",
+    tools: ["imagemagick"],
     priority: 10,
     properties: propertiesImagemagick,
     convert: convertImagemagick,
@@ -61,7 +61,7 @@ export const CONVERTERS: Record<string, ConverterEntry> = {
   // Highest priority for PDF input: ImageMagick can read PDFs only through a
   // ghostscript delegate that is often absent, and it rasterizes badly.
   poppler: {
-    tool: "poppler",
+    tools: ["poppler"],
     priority: 30,
     properties: propertiesPoppler,
     convert: convertPoppler,
