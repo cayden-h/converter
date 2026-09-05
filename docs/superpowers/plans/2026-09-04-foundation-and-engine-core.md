@@ -961,6 +961,7 @@ Builds the `from -> to -> converter` index, filtered to tools that actually reso
 ```ts
 import { describe, expect, test } from "vitest";
 import { buildRegistry } from "../../src/main/engine/registry";
+import { normalizeOutputFiletype } from "../../src/main/engine/normalizeFiletype";
 
 const fakeConverter = {
   properties: {
@@ -1040,7 +1041,28 @@ describe("buildRegistry", () => {
     expect(outputs).not.toContain("jpeg");
   });
 
+  test("advertises only strings already in produced-filename form", () => {
+    // The strings the picker shows BECOME the file's extension. Advertising a
+    // spelling that normalizeOutputFiletype would rewrite means the UI and the
+    // file on disk disagree.
+    //
+    // This is the load-bearing regression guard. An earlier version of this
+    // test asserted only that both "jpg" and "jpeg" route to a converter,
+    // which passed against the BUGGY implementation too - there both spellings
+    // folded to "jpeg" and the buggy index also held "jpeg", so it matched by
+    // coincidence. This invariant genuinely fails pre-fix.
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    for (const output of registry.outputsFor("png")) {
+      expect(normalizeOutputFiletype(output), `advertised "${output}"`).toBe(output);
+    }
+  });
+
   test("routes both jpg and jpeg spellings to the same converter", () => {
+    // Smoke test only. Note it cannot fail independently of the invariant
+    // above - do not treat it as regression coverage on its own.
     const registry = buildRegistry(
       { imagemagick: { tool: "imagemagick", ...fakeConverter } },
       { imagemagick: "/bin/magick" },
@@ -1191,7 +1213,7 @@ export function buildRegistry(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/registry.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1204,7 +1226,7 @@ git commit -m "feat: add converter registry filtered by available tools"
 
 ### Task 6: Job runner
 
-Runs conversions with a concurrency cap, per-job temp directories, progress events, and cleanup.
+Runs conversions with a concurrency cap, progress events, per-batch output-name collision handling, and a timeout that actually kills the child process. Note it does NOT create temp directories: converters write straight to the destination, so there is nothing to stage or clean up.
 
 **Files:**
 - Create: `src/main/engine/job.ts`
@@ -1218,6 +1240,7 @@ Runs conversions with a concurrency cap, per-job temp directories, progress even
 import { describe, expect, test, vi } from "vitest";
 import { JobRunner } from "../../src/main/engine/job";
 import { buildRegistry } from "../../src/main/engine/registry";
+import { normalizeOutputFiletype } from "../../src/main/engine/normalizeFiletype";
 
 function registryWith(convert: () => Promise<string>) {
   return buildRegistry(
@@ -2151,7 +2174,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 52 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 10, job 7, offline 6, integration 2.
+Expected: all suites pass. Total should be 53 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 11, job 7, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
