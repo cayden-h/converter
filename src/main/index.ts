@@ -49,6 +49,10 @@ app.whenReady().then(() => {
     engine.registry.outputsFor(extension),
   );
 
+  ipcMain.handle(IPC.groupedOutputsFor, (_event, extension: string) =>
+    engine.registry.groupedOutputsFor(extension),
+  );
+
   ipcMain.handle(IPC.run, (_event, items: ConvertRequest[]) => engine.runner.run(items));
 
   ipcMain.handle(IPC.reveal, (_event, target: string) => {

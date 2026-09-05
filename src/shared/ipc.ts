@@ -16,9 +16,15 @@ export interface ConvertResult {
   error?: string;
 }
 
+export interface FormatGroup {
+  medium: string;
+  formats: string[];
+}
+
 export const IPC = {
   detectTools: "converter:detectTools",
   outputsFor: "converter:outputsFor",
+  groupedOutputsFor: "converter:groupedOutputsFor",
   run: "converter:run",
   reveal: "converter:reveal",
 } as const;
@@ -26,6 +32,7 @@ export const IPC = {
 export interface ConverterApi {
   detectTools(): Promise<ToolStatus[]>;
   outputsFor(extension: string): Promise<string[]>;
+  groupedOutputsFor(extension: string): Promise<FormatGroup[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   reveal(path: string): Promise<void>;
   /**

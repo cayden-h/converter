@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createEngine, CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
 import { properties as imagemagick } from "../../src/main/engine/converters/imagemagick";
 import { properties as ffmpeg } from "../../src/main/engine/converters/ffmpeg";
+import { mediumOf } from "../../src/main/engine/media";
 
 function flatten(formats: Record<string, string[]>): Set<string> {
   return new Set(Object.values(formats).flat());
@@ -49,5 +50,23 @@ describe("real routing", () => {
     for (const [name, entry] of Object.entries(CONVERTERS)) {
       expect(entry.priority, `${name} must declare a priority`).toBeDefined();
     }
+  });
+});
+
+describe("format classification coverage", () => {
+  test("the common formats a user will actually pick are all classified", () => {
+    // "Other" is a safety net, not a destination. If a format people convert
+    // every day lands there, the picker shows it under a meaningless heading.
+    const common = [
+      "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "ico", "avif", "heic",
+      "mp4", "mov", "mkv", "webm", "avi",
+      "mp3", "wav", "flac", "aac", "ogg", "m4a",
+      "pdf", "txt", "md", "html", "docx", "rtf",
+      "epub", "mobi",
+      "csv", "json", "yaml", "xml",
+      "svg", "eps",
+    ];
+    const unclassified = common.filter((f) => mediumOf(f) === "Other");
+    expect(unclassified, `unclassified: ${unclassified.join(", ")}`).toEqual([]);
   });
 });

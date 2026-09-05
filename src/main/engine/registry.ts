@@ -1,4 +1,5 @@
 import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
+import { mediumOf, MEDIA_GROUP_ORDER, type Medium } from "./media";
 import type { ToolName, Toolchain } from "./toolchain";
 import type { ExecFileFn } from "./types";
 
@@ -38,6 +39,8 @@ export interface ResolvedConverter extends ConverterEntry {
 export interface Registry {
   /** Output formats reachable from this input, sorted and deduplicated. */
   outputsFor(input: string): string[];
+  /** Output formats reachable from this input, grouped by medium for display. */
+  groupedOutputsFor(input: string): { medium: Medium; formats: string[] }[];
   /** The converter that handles this pair, or null if unroutable. */
   converterFor(input: string, output: string): ResolvedConverter | null;
   /** Tools that a registered converter needs but which did not resolve. */
@@ -97,15 +100,36 @@ export function buildRegistry(
     to: flattenOutputs(converter.properties.to),
   }));
 
+  // Extracted so groupedOutputsFor can reuse this without relying on `this`
+  // inside an object literal returned directly from this function.
+  function computeOutputsFor(input: string): string[] {
+    const key = normalizeFiletype(input);
+    const outputs = new Set<string>();
+    for (const entry of index) {
+      if (!entry.from.has(key)) continue;
+      for (const format of entry.to) outputs.add(format);
+    }
+    return [...outputs].sort();
+  }
+
   return {
     outputsFor(input) {
-      const key = normalizeFiletype(input);
-      const outputs = new Set<string>();
-      for (const entry of index) {
-        if (!entry.from.has(key)) continue;
-        for (const format of entry.to) outputs.add(format);
+      return computeOutputsFor(input);
+    },
+
+    groupedOutputsFor(input) {
+      const outputs = computeOutputsFor(input);
+      const groups = new Map<Medium, string[]>();
+      for (const format of outputs) {
+        const medium = mediumOf(format);
+        const bucket = groups.get(medium);
+        if (bucket) bucket.push(format);
+        else groups.set(medium, [format]);
       }
-      return [...outputs].sort();
+      return MEDIA_GROUP_ORDER.filter((medium) => groups.has(medium)).map((medium) => ({
+        medium,
+        formats: groups.get(medium)!,
+      }));
     },
 
     converterFor(input, output) {
