@@ -63,6 +63,14 @@ describe("real routing", () => {
     ["gif", "png", "imagemagick"],
     ["pdf", "png", "poppler"],
     ["pdf", "txt", "poppler"],
+    ["md", "html", "pandoc"],
+    ["md", "pdf", "electronPdf"],
+    ["html", "pdf", "electronPdf"],
+    ["svg", "png", "resvg"],
+    ["png", "svg", "rasterTrace"],
+    ["csv", "json", "dasel"],
+    ["json", "yaml", "dasel"],
+    ["epub", "html", "pandoc"],
   ])("routes %s to %s via %s", (from, to, expected) => {
     expect(engine.registry.converterFor(from, to)?.name).toBe(expected);
   });
