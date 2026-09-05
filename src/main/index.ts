@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, session } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEngine } from "./engine";
@@ -66,6 +66,15 @@ app.whenReady().then(() => {
 
   ipcMain.handle(IPC.reveal, (_event, target: string) => {
     shell.showItemInFolder(target);
+  });
+
+  ipcMain.handle(IPC.openFiles, async () => {
+    if (!mainWindow) return [];
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"],
+    });
+    if (result.canceled) return [];
+    return result.filePaths;
   });
 
   forwardProgress(engine.runner, () => mainWindow);

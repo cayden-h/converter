@@ -8,6 +8,7 @@ const api: ConverterApi = {
   run: (items: ConvertRequest[]) => ipcRenderer.invoke(IPC.run, items),
   cancel: () => ipcRenderer.invoke(IPC.cancel),
   reveal: (target: string) => ipcRenderer.invoke(IPC.reveal, target),
+  openFiles: () => ipcRenderer.invoke(IPC.openFiles),
   onProgress: (handler: (update: ProgressUpdate) => void) => {
     const listener = (_event: unknown, update: ProgressUpdate) => handler(update);
     ipcRenderer.on(IPC.progress, listener);

@@ -35,6 +35,7 @@ export const IPC = {
   cancel: "converter:cancel",
   reveal: "converter:reveal",
   progress: "converter:progress",
+  openFiles: "converter:openFiles",
 } as const;
 
 export interface ConverterApi {
@@ -44,6 +45,8 @@ export interface ConverterApi {
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   cancel(): Promise<void>;
   reveal(path: string): Promise<void>;
+  /** Opens the native file picker with multi-selection enabled; resolves to the chosen absolute paths (empty if cancelled). */
+  openFiles(): Promise<string[]>;
   /** Subscribe to conversion progress. Returns an unsubscribe function. */
   onProgress(handler: (update: ProgressUpdate) => void): () => void;
   /**
