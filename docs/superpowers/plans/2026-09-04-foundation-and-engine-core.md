@@ -1303,6 +1303,33 @@ describe("JobRunner", () => {
     expect(peak).toBeLessThanOrEqual(2);
   });
 
+  test("always hands the converter an execFileOverride", async () => {
+    // Lifted converters default to raw node execFile, which resolves the bare
+    // command name through the inherited system PATH. That defeats the whole
+    // toolchain. The override is what pins the absolute path, so the runner
+    // must never call convert() without it.
+    let sawOverride: unknown = "never called";
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "imagemagick",
+          properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+          convert: async (_f, _t, _c, _p, _o, execFileOverride) => {
+            sawOverride = execFileOverride;
+            return "Done";
+          },
+        },
+      },
+      { imagemagick: "/bin/magick" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+    });
+    await runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    expect(typeof sawOverride).toBe("function");
+  });
+
   test("times out a hung conversion", async () => {
     const runner = new JobRunner(
       registryWith(() => new Promise(() => {})),
@@ -1437,7 +1464,7 @@ export class JobRunner extends EventEmitter {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/job.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2124,7 +2151,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 51 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 10, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 52 tests across 7 files: toolchain 11, exec 10, imagemagick 6, registry 10, job 7, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
