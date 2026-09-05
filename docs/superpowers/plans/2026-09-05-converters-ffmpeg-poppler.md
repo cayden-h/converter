@@ -175,6 +175,140 @@ git commit -m "feat: order converters by explicit priority, not declaration orde
 
 ---
 
+### Task 1b: Make priority depend on the input format
+
+Task 1 gave each converter a static priority. Measuring the real tables shows that is not expressive enough, and picking either constant ordering causes a real regression:
+
+- **Every common still output is contested.** ImageMagick and ffmpeg both claim `jpg`, `png`, `webp`, `gif`, `bmp`, `tiff`, `ico` and `avif`. Ranking ffmpeg above ImageMagick would reroute `png -> jpg` to ffmpeg, degrading still-image conversion and changing a path Plan 1 verified end to end.
+- **But ranking ImageMagick above ffmpeg is worse.** ImageMagick advertises `mp4` and reads `avi`/`flv`/`mov`, so `mp4 -> gif` would route to ImageMagick - which on this very machine failed silently through a broken delegate, producing no file at all.
+
+Upstream's own category keys cannot break the tie: ImageMagick files everything, `mp4` included, under `images`, and ffmpeg files everything under `muxer`. The medium classification has to be ours.
+
+The fix is to let a converter rank itself against the INPUT format.
+
+**Files:**
+- Modify: `src/main/engine/registry.ts`
+- Modify: `tests/engine/registry.test.ts`
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/engine/registry.test.ts`:
+
+```ts
+  test("lets a converter rank itself by the input format", () => {
+    // ffmpeg should own video inputs and yield on stills. A single constant
+    // cannot express that, because the two converters contest every common
+    // still format AND several video ones.
+    const stills = {
+      tool: "imagemagick" as const,
+      priority: 10,
+      properties: { from: { images: ["png", "mp4"] }, to: { images: ["gif"] } },
+      convert: async () => "stills",
+    };
+    const motion = {
+      tool: "ffmpeg" as const,
+      priority: (input: string) => (input === "mp4" ? 30 : 5),
+      properties: { from: { muxer: ["png", "mp4"] }, to: { muxer: ["gif"] } },
+      convert: async () => "motion",
+    };
+    const registry = buildRegistry(
+      { imagemagick: stills, ffmpeg: motion },
+      { imagemagick: "/bin/magick", ffmpeg: "/bin/ffmpeg" },
+    );
+    expect(registry.converterFor("mp4", "gif")?.name, "video input").toBe("ffmpeg");
+    expect(registry.converterFor("png", "gif")?.name, "still input").toBe("imagemagick");
+  });
+
+  test("normalizes the input before asking a converter to rank itself", () => {
+    const seen: string[] = [];
+    const probe = {
+      tool: "ffmpeg" as const,
+      priority: (input: string) => {
+        seen.push(input);
+        return 1;
+      },
+      properties: { from: { muxer: ["jpeg"] }, to: { muxer: ["gif"] } },
+      convert: async () => "probe",
+    };
+    const registry = buildRegistry({ ffmpeg: probe }, { ffmpeg: "/bin/ffmpeg" });
+    registry.converterFor("JPG", "gif");
+    expect(seen).toContain("jpeg");
+  });
+```
+
+- [ ] **Step 2: Run and confirm failure**
+
+Run: `npx vitest run tests/engine/registry.test.ts`
+Expected: FAIL - a function is not assignable to `priority: number`. Report the output.
+
+- [ ] **Step 3: Implement**
+
+In `src/main/engine/registry.ts`, widen the type:
+
+```ts
+  /**
+   * Higher wins when more than one converter claims a pair.
+   *
+   * A function receives the NORMALIZED input format so a converter can rank
+   * itself by medium. That is necessary rather than decorative: ImageMagick and
+   * ffmpeg contest every common still format, and upstream's category keys
+   * cannot separate them (ImageMagick files mp4 under "images"; ffmpeg files
+   * everything under "muxer").
+   */
+  priority: number | ((input: string) => number);
+```
+
+Add a resolver:
+
+```ts
+function priorityOf(entry: ConverterEntry, input: string): number {
+  return typeof entry.priority === "function" ? entry.priority(input) : entry.priority;
+}
+```
+
+Remove the build-time `.sort(...)` added in Task 1 - ordering now depends on the query - and rank inside `converterFor` instead:
+
+```ts
+    converterFor(input, output) {
+      const from = normalizeFiletype(input);
+      const to = normalizeOutputFiletype(output);
+      const candidates = index.filter((entry) => entry.from.has(from) && entry.to.has(to));
+      if (candidates.length === 0) return null;
+      let best = candidates[0]!;
+      let bestPriority = priorityOf(best.converter, from);
+      for (const candidate of candidates.slice(1)) {
+        const priority = priorityOf(candidate.converter, from);
+        if (priority > bestPriority) {
+          best = candidate;
+          bestPriority = priority;
+        }
+      }
+      return best.converter;
+    },
+```
+
+- [ ] **Step 4: Confirm pass**
+
+Run: `npx vitest run tests/engine/registry.test.ts`
+Expected: PASS, 16 tests. The Task 1 static-priority tests must still pass - a number and a function have to coexist.
+
+- [ ] **Step 5: Prove it is not vacuous**
+
+Temporarily make `priorityOf` ignore the function form and always return `0`. Re-run.
+Expected: `lets a converter rank itself by the input format` FAILS.
+**Report that output**, then restore.
+
+- [ ] **Step 6: Full suite and commit**
+
+Run: `npm test` and `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+
+```bash
+git add src/main/engine/registry.ts tests/engine/registry.test.ts
+git commit -m "feat: let converters rank themselves by input format"
+```
+
+---
+
 ### Task 2: Compound output formats
 
 ffmpeg advertises `av1.mp4`, `h264.mkv`, `h265.mp4`, `h266.mkv` and similar. The codec prefix is meaningful to ffmpeg - it switches `-c:v` - but it must not end up in the filename.
@@ -656,13 +790,24 @@ In `src/main/engine/index.ts`, import ffmpeg and add it to `CONVERTERS`, and giv
 import { convert as convertFfmpeg, properties as propertiesFfmpeg } from "./converters/ffmpeg";
 import { toFfmpegExecFile } from "./exec";
 
+/**
+ * Input formats ffmpeg should own outright. Upstream's category keys cannot be
+ * used for this: ImageMagick lists mp4 under "images" and ffmpeg lists
+ * everything under "muxer", so the medium classification has to be ours.
+ */
+const MEDIA_INPUTS = new Set([
+  "mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "3gp", "ts",
+  "mp3", "wav", "flac", "aac", "ogg", "opus", "m4a", "wma", "aiff",
+]);
+
 const CONVERTERS: Record<string, ConverterEntry> = {
-  // ffmpeg outranks ImageMagick on their 45 overlapping output formats: those
-  // overlaps are video and animation containers, which ffmpeg handles properly
-  // and ImageMagick only approximates through delegates.
+  // ffmpeg wins when the INPUT is a video or audio container, and yields on
+  // stills. A constant would be wrong in both directions: ranking it above
+  // ImageMagick reroutes png -> jpg through ffmpeg, and ranking it below sends
+  // mp4 -> gif to ImageMagick, whose mp4 delegate is frequently broken.
   ffmpeg: {
     tool: "ffmpeg",
-    priority: 20,
+    priority: (input: string) => (MEDIA_INPUTS.has(input) ? 30 : 5),
     properties: propertiesFfmpeg,
     convert: (filePath, fileType, convertTo, targetPath, options, execFileOverride) =>
       convertFfmpeg(
@@ -1077,7 +1222,7 @@ These were checked against the real binaries on this machine, so treat them as s
 - Converter priority is explicit, tested, and proven to beat declaration order in both directions.
 - Compound outputs like `av1.mp4` produce `clip.mp4`, while the converter still receives the full string.
 - One toolchain entry covers poppler's three binaries, and `toCommandMap` resolves all of them.
-- ffmpeg is lifted byte-identical, adapted to its own argument order, and outranks ImageMagick on their 45 overlapping outputs.
+- ffmpeg is lifted byte-identical, adapted to its own argument order, and wins on video and audio inputs while ImageMagick keeps stills - verified against the real tables, not assumed.
 - Poppler reads PDFs to png, jpeg, tiff and txt.
 - Integration tests convert real video and real PDFs with real binaries, and are confirmed to have actually run.
 - `npm test` green, `npx tsc -b tsconfig.node.json tsconfig.web.json` exits 0, `npm run build` succeeds.
