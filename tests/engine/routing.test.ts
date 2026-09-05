@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createEngine, CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
 import { properties as imagemagick } from "../../src/main/engine/converters/imagemagick";
 import { properties as ffmpeg } from "../../src/main/engine/converters/ffmpeg";
-import { mediumOf, isOfferable } from "../../src/main/engine/media";
+import { mediumOf } from "../../src/main/engine/media";
 
 function flatten(formats: Record<string, string[]>): Set<string> {
   return new Set(Object.values(formats).flat());
@@ -52,14 +52,28 @@ describe("real routing", () => {
     }
   });
 
-  test("the offerable set is a usable size, not the whole raw table", () => {
-    // A picker listing every raw format is unusable. This is a guard against
-    // the junk creeping back, not an exact target.
+  test("offers every format a real user might plausibly pick", () => {
+    // Replaces a ratio test (offerable < half of all) that was a proxy metric.
+    // Satisfying the ratio required hiding ~140 formats, which reached past the
+    // junk into real ones - mxf, dnxhd, aifc and y4m were all silently lost.
+    // Assert the property directly instead of a count.
     const engine = createEngine("/nonexistent-bundle-dir");
-    const all = engine.registry.outputsFor("png");
-    const offerable = all.filter(isOfferable);
-    expect(offerable.length).toBeGreaterThan(40);
-    expect(offerable.length).toBeLessThan(all.length / 2);
+    const offered = new Set(
+      engine.registry.groupedOutputsFor("mp4").flatMap((g) => g.formats),
+    );
+    const mustOffer = ["mp4", "mkv", "webm", "mov", "gif", "mxf", "y4m", "mp3", "wav", "flac"];
+    const missing = mustOffer.filter((f) => !offered.has(f));
+    expect(missing, `real formats hidden from the picker: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  test("offers no pseudo-format or codec-only name", () => {
+    const engine = createEngine("/nonexistent-bundle-dir");
+    const offered = new Set(
+      engine.registry.groupedOutputsFor("png").flatMap((g) => g.formats),
+    );
+    const mustHide = ["null", "clipboard", "histogram", "info", "mask", "264", "hevc", "png8"];
+    const leaked = mustHide.filter((f) => offered.has(f));
+    expect(leaked, `junk offered in the picker: ${leaked.join(", ")}`).toEqual([]);
   });
 });
 
