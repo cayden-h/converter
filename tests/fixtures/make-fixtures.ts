@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +49,56 @@ export function ensureHeicFixture(magickPath: string): string {
   const target = path.join(dir, "sample.heic");
   if (!existsSync(target)) {
     execFileSync(magickPath, ["-size", "64x64", "xc:navy", target]);
+  }
+  return target;
+}
+
+/** A minimal markdown document. Plain text - no tool needed to produce it. */
+export function ensureMarkdownFixture(): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.md");
+  if (!existsSync(target)) {
+    writeFileSync(target, "# Sample\n\nSome **bold** text.\n");
+  }
+  return target;
+}
+
+/** A minimal standalone HTML document. Plain text - no tool needed. */
+export function ensureHtmlFixture(): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.html");
+  if (!existsSync(target)) {
+    writeFileSync(
+      target,
+      "<!doctype html><html><head><title>Sample</title></head><body><h1>Sample</h1></body></html>\n",
+    );
+  }
+  return target;
+}
+
+/**
+ * A tiny real SVG with a visible shape, not just an empty wrapper - resvg
+ * needs actual geometry to rasterize into a non-trivial PNG.
+ */
+export function ensureSvgFixture(): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.svg");
+  if (!existsSync(target)) {
+    writeFileSync(
+      target,
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+        '<rect width="64" height="64" fill="red"/></svg>\n',
+    );
+  }
+  return target;
+}
+
+/** A minimal CSV with a header row. Plain text - no tool needed. */
+export function ensureCsvFixture(): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.csv");
+  if (!existsSync(target)) {
+    writeFileSync(target, "name,age\nAda,30\nGrace,40\n");
   }
   return target;
 }
