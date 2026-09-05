@@ -24,6 +24,15 @@ That gap is real and this plan closes it with a composite converter rather than 
 
 **vtracer is not installable via Homebrew.** It is a Rust crate needing `cargo install`. It remains detect-only, reported by the Formats panel with the correct hint. `potrace` plus the composite converter covers raster-to-vector without it.
 
+## Verified against the real binaries before writing this plan
+
+Treat these as settled - they were run, not assumed:
+
+- `magick shape.png -monochrome shape.pbm` produces a valid 1210-byte bitmap.
+- `potrace -s -o shape.svg shape.pbm` produces a 720-byte SVG containing a real `<path>` element, not an empty wrapper. This is what makes Task 3's two-step approach viable.
+- `pandoc -s -o doc.html doc.md` produces a document containing `<html>`.
+- Upstream's dasel argument form - `--var data=<type>:file:<path> --out <type> $data` - works with the installed dasel 3.11.2 and emits valid JSON. Worth noting because dasel's CLI changed between major versions and the older `-f/-r/-w` form fails outright on this machine.
+
 ---
 
 ### Task 1: Lift pandoc, resvg and dasel
