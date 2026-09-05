@@ -10,7 +10,8 @@
     "build": "tsc -b tsconfig.node.json tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "vendor": "npx tsx scripts/vendor-binaries.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
