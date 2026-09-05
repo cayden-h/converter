@@ -187,4 +187,44 @@ describe("buildRegistry", () => {
     );
     expect(registry.converterFor("gif", "png")?.name).toBe("imagemagick");
   });
+
+  test("lets a converter rank itself by the input format", () => {
+    // ffmpeg should own video inputs and yield on stills. A single constant
+    // cannot express that, because the two converters contest every common
+    // still format AND several video ones.
+    const stills = {
+      tool: "imagemagick" as const,
+      priority: 10,
+      properties: { from: { images: ["png", "mp4"] }, to: { images: ["gif"] } },
+      convert: async () => "stills",
+    };
+    const motion = {
+      tool: "ffmpeg" as const,
+      priority: (input: string) => (input === "mp4" ? 30 : 5),
+      properties: { from: { muxer: ["png", "mp4"] }, to: { muxer: ["gif"] } },
+      convert: async () => "motion",
+    };
+    const registry = buildRegistry(
+      { imagemagick: stills, ffmpeg: motion },
+      { imagemagick: "/bin/magick", ffmpeg: "/bin/ffmpeg" },
+    );
+    expect(registry.converterFor("mp4", "gif")?.name, "video input").toBe("ffmpeg");
+    expect(registry.converterFor("png", "gif")?.name, "still input").toBe("imagemagick");
+  });
+
+  test("normalizes the input before asking a converter to rank itself", () => {
+    const seen: string[] = [];
+    const probe = {
+      tool: "ffmpeg" as const,
+      priority: (input: string) => {
+        seen.push(input);
+        return 1;
+      },
+      properties: { from: { muxer: ["jpeg"] }, to: { muxer: ["gif"] } },
+      convert: async () => "probe",
+    };
+    const registry = buildRegistry({ ffmpeg: probe }, { ffmpeg: "/bin/ffmpeg" });
+    registry.converterFor("JPG", "gif");
+    expect(seen).toContain("jpeg");
+  });
 });
