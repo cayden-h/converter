@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ConvertResult, ToolStatus } from "../shared/ipc";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ConvertResult, FormatGroup, ToolStatus } from "../shared/ipc";
 import { DropZone } from "./components/DropZone";
 import { FileRow } from "./components/FileRow";
+import { FormatPicker } from "./components/FormatPicker";
+import { computeFormatAvailability } from "./formatAvailability";
 import { useFiles } from "./useFiles";
 
 export function App() {
   const [tools, setTools] = useState<ToolStatus[]>([]);
   const { files, add, remove, clear } = useFiles();
-  const [outputs, setOutputs] = useState<string[]>([]);
+  const [perFileGroups, setPerFileGroups] = useState<FormatGroup[][]>([]);
   const [target, setTarget] = useState("");
   const [results, setResults] = useState<ConvertResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -16,32 +18,34 @@ export function App() {
     window.converter.detectTools().then(setTools);
   }, []);
 
-  // The formats offered are the INTERSECTION of what every selected file can
-  // reach. A proper grouped/searchable picker with per-format availability
-  // reasons lands in the next task; for now this keeps multi-file selection
-  // correct with a plain <select>.
   useEffect(() => {
     if (files.length === 0) {
-      setOutputs([]);
-      setTarget("");
+      setPerFileGroups([]);
       return;
     }
     let cancelled = false;
-    Promise.all(files.map((file) => window.converter.outputsFor(file.extension))).then(
-      (lists) => {
-        if (cancelled) return;
-        const [first, ...rest] = lists;
-        const intersection = (first ?? []).filter((format) =>
-          rest.every((list) => list.includes(format)),
-        );
-        setOutputs(intersection);
-        setTarget((prev) => (intersection.includes(prev) ? prev : (intersection[0] ?? "")));
+    Promise.all(files.map((file) => window.converter.groupedOutputsFor(file.extension))).then(
+      (groups) => {
+        if (!cancelled) setPerFileGroups(groups);
       },
     );
     return () => {
       cancelled = true;
     };
   }, [files]);
+
+  const availability = useMemo(
+    () => computeFormatAvailability(perFileGroups),
+    [perFileGroups],
+  );
+
+  // If the currently selected target stops being reachable by every file
+  // (the file list changed), fall back to the first still-enabled format.
+  useEffect(() => {
+    const current = availability.find((item) => item.format === target);
+    if (current?.enabled) return;
+    setTarget(availability.find((item) => item.enabled)?.format ?? "");
+  }, [availability, target]);
 
   const openFiles = useCallback(async () => {
     const paths = await window.converter.openFiles();
@@ -86,31 +90,21 @@ export function App() {
       )}
 
       {files.length > 0 && (
-        <section className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-ink">
-            Convert to
-            <select
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              className="rounded border border-border bg-surface px-2 py-1 text-ink"
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium text-ink">Convert to</h2>
+          <FormatPicker perFileGroups={perFileGroups} value={target} onChange={setTarget} />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onConvert}
+              disabled={busy || !target}
+              className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {outputs.map((format) => (
-                <option key={format} value={format}>
-                  {format}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            onClick={onConvert}
-            disabled={busy || !target}
-            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {busy ? "Converting..." : "Convert"}
-          </button>
-          <button type="button" onClick={clear} className="text-sm text-muted hover:text-ink">
-            Clear
-          </button>
+              {busy ? "Converting..." : "Convert"}
+            </button>
+            <button type="button" onClick={clear} className="text-sm text-muted hover:text-ink">
+              Clear
+            </button>
+          </div>
         </section>
       )}
 
