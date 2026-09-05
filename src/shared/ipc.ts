@@ -28,4 +28,13 @@ export interface ConverterApi {
   outputsFor(extension: string): Promise<string[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   reveal(path: string): Promise<void>;
+  /**
+   * Resolves a dropped File to its absolute path.
+   *
+   * Electron 32 REMOVED `File.path`, so a renderer cannot read it directly any
+   * more; `webUtils.getPathForFile` in the preload is the replacement. Typed as
+   * `unknown` rather than `File` because this file compiles under both the node
+   * and web tsconfig projects, and the node project has no DOM lib.
+   */
+  pathForFile(file: unknown): string;
 }
