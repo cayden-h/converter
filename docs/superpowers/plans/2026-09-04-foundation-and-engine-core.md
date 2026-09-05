@@ -248,7 +248,10 @@ describe("resolveTool", () => {
     expect(result).toBeNull();
   });
 
-  test("appends .exe on win32", () => {
+  test("builds the win32 bundled path with backslashes and an .exe suffix", () => {
+    // Asserts the FULL path, not just a substring. A `toContain("magick.exe")`
+    // check here would pass even if the separators were wrong, which is the
+    // exact bug this test exists to catch when running on a non-Windows host.
     const seen: string[] = [];
     resolveTool("imagemagick", {
       platform: "win32",
@@ -259,7 +262,21 @@ describe("resolveTool", () => {
         return false;
       },
     });
-    expect(seen[0]).toContain("magick.exe");
+    expect(seen[0]).toBe("C:\\app\\bin\\win32-x64\\magick.exe");
+  });
+
+  test("builds the darwin bundled path with forward slashes and no suffix", () => {
+    const seen: string[] = [];
+    resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen[0]).toBe("/bundle/bin/darwin-arm64/magick");
   });
 
   test("prefers the bundled binary over a system one", () => {
@@ -354,17 +371,23 @@ export interface ResolveOptions {
 export function resolveTool(name: ToolName, options: ResolveOptions): string | null {
   const spec = KNOWN_TOOLS[name];
   const exists = options.exists ?? existsSync;
-  const ext = options.platform === "win32" ? ".exe" : "";
+  const isWindows = options.platform === "win32";
 
-  const bundled = path.join(
+  // Join with the TARGET platform's separator, not the host's. Plain
+  // `path.join` uses whichever flavor the running machine has, which would
+  // build "C:\\app\\bin/win32-x64/magick.exe" when resolving a Windows
+  // path from a Mac.
+  const join = isWindows ? path.win32.join : path.posix.join;
+  const ext = isWindows ? ".exe" : "";
+
+  const bundled = join(
     options.bundleDir,
     `${options.platform}-${options.arch}`,
     `${spec.binary}${ext}`,
   );
   if (exists(bundled)) return bundled;
 
-  const systemPaths =
-    options.platform === "win32" ? spec.systemPaths.win32 : spec.systemPaths.darwin;
+  const systemPaths = isWindows ? spec.systemPaths.win32 : spec.systemPaths.darwin;
   for (const candidate of systemPaths) {
     if (exists(candidate)) return candidate;
   }
@@ -387,7 +410,7 @@ export function detectToolchain(options: ResolveOptions): Toolchain {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/toolchain.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1820,7 +1843,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 38 tests across 7 files: toolchain 6, exec 4, imagemagick 6, registry 8, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 39 tests across 7 files: toolchain 7, exec 4, imagemagick 6, registry 8, job 6, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
