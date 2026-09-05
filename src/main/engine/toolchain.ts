@@ -62,17 +62,23 @@ export interface ResolveOptions {
 export function resolveTool(name: ToolName, options: ResolveOptions): string | null {
   const spec = KNOWN_TOOLS[name];
   const exists = options.exists ?? existsSync;
-  const ext = options.platform === "win32" ? ".exe" : "";
+  const isWindows = options.platform === "win32";
 
-  const bundled = path.join(
+  // Join with the TARGET platform's separator, not the host's. Plain
+  // `path.join` uses whichever flavor the running machine has, which would
+  // build "C:\\app\\bin/win32-x64/magick.exe" when resolving a Windows
+  // path from a Mac.
+  const join = isWindows ? path.win32.join : path.posix.join;
+  const ext = isWindows ? ".exe" : "";
+
+  const bundled = join(
     options.bundleDir,
     `${options.platform}-${options.arch}`,
     `${spec.binary}${ext}`,
   );
   if (exists(bundled)) return bundled;
 
-  const systemPaths =
-    options.platform === "win32" ? spec.systemPaths.win32 : spec.systemPaths.darwin;
+  const systemPaths = isWindows ? spec.systemPaths.win32 : spec.systemPaths.darwin;
   for (const candidate of systemPaths) {
     if (exists(candidate)) return candidate;
   }

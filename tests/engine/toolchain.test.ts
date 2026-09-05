@@ -34,7 +34,10 @@ describe("resolveTool", () => {
     expect(result).toBeNull();
   });
 
-  test("appends .exe on win32", () => {
+  test("builds the win32 bundled path with backslashes and an .exe suffix", () => {
+    // Asserts the FULL path, not just a substring. A `toContain("magick.exe")`
+    // check here would pass even if the separators were wrong, which is the
+    // exact bug this test exists to catch when running on a non-Windows host.
     const seen: string[] = [];
     resolveTool("imagemagick", {
       platform: "win32",
@@ -45,7 +48,21 @@ describe("resolveTool", () => {
         return false;
       },
     });
-    expect(seen[0]).toContain("magick.exe");
+    expect(seen[0]).toBe("C:\\app\\bin\\win32-x64\\magick.exe");
+  });
+
+  test("builds the darwin bundled path with forward slashes and no suffix", () => {
+    const seen: string[] = [];
+    resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen[0]).toBe("/bundle/bin/darwin-arm64/magick");
   });
 
   test("prefers the bundled binary over a system one", () => {
