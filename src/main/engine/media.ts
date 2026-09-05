@@ -11,31 +11,9 @@
  * convert are all classified, so adding a converter cannot silently dump
  * common formats into "Other".
  */
-export type Medium =
-  | "Images"
-  | "Video"
-  | "Audio"
-  | "Documents"
-  | "E-books"
-  | "Data"
-  | "Vector"
-  | "3D"
-  | "Subtitles"
-  | "Other";
+import { MEDIA_GROUP_ORDER, type Medium } from "../../shared/media";
 
-/** Display order for the picker. "Other" is last: it is a fallback, not a home. */
-export const MEDIA_GROUP_ORDER: readonly Medium[] = [
-  "Images",
-  "Video",
-  "Audio",
-  "Documents",
-  "E-books",
-  "Data",
-  "Vector",
-  "3D",
-  "Subtitles",
-  "Other",
-];
+export { MEDIA_GROUP_ORDER, type Medium };
 
 const BY_MEDIUM: Record<Exclude<Medium, "Other">, readonly string[]> = {
   Images: [

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { mediumOf, isOfferable, MEDIA_GROUP_ORDER } from "../../src/main/engine/media";
+import { MEDIA_GROUP_ORDER as sharedOrder } from "../../src/shared/media";
+
+test("the engine re-exports the shared ordering rather than redefining it", () => {
+  expect(MEDIA_GROUP_ORDER).toBe(sharedOrder);
+});
 
 describe("mediumOf", () => {
   test.each([

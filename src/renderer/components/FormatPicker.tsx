@@ -1,27 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { FormatGroup } from "../../shared/ipc";
+import { MEDIA_GROUP_ORDER } from "../../shared/media";
 import { computeFormatAvailability, type AvailableFormat } from "../formatAvailability";
-
-/**
- * Mirrors `MEDIA_GROUP_ORDER` in `src/main/engine/media.ts`. Duplicated
- * rather than imported: the renderer is sandboxed from `src/main/**`
- * (`tsconfig.web.json` only includes `src/renderer` and `src/shared`), and
- * `groupedOutputsFor` already returns each file's groups in this order, so
- * the renderer only needs the order to merge several files' groups back
- * together consistently.
- */
-const MEDIUM_ORDER = [
-  "Images",
-  "Video",
-  "Audio",
-  "Documents",
-  "E-books",
-  "Data",
-  "Vector",
-  "3D",
-  "Subtitles",
-  "Other",
-] as const;
 
 interface FormatPickerProps {
   /** One entry per selected file, each that file's `groupedOutputsFor` result. */
@@ -51,7 +31,7 @@ export function FormatPicker({ perFileGroups, value, onChange }: FormatPickerPro
     for (const bucket of byMedium.values()) {
       bucket.sort((a, b) => a.format.localeCompare(b.format));
     }
-    return MEDIUM_ORDER.filter((medium) => byMedium.has(medium)).map((medium) => ({
+    return MEDIA_GROUP_ORDER.filter((medium) => byMedium.has(medium)).map((medium) => ({
       medium,
       formats: byMedium.get(medium)!,
     }));
