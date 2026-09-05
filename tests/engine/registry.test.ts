@@ -66,6 +66,27 @@ describe("buildRegistry", () => {
     expect(registry.missingTools()).toEqual(["imagemagick"]);
   });
 
+  test("offers jpg, not jpeg, so the picker matches the produced filename", () => {
+    // Regression guard. The registry once folded outputs with the INPUT
+    // normalizer, so it advertised "jpeg" while the written file was ".jpg".
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    const outputs = registry.outputsFor("png");
+    expect(outputs).toContain("jpg");
+    expect(outputs).not.toContain("jpeg");
+  });
+
+  test("routes both jpg and jpeg spellings to the same converter", () => {
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    expect(registry.converterFor("png", "jpg")?.name).toBe("imagemagick");
+    expect(registry.converterFor("png", "jpeg")?.name).toBe("imagemagick");
+  });
+
   test("output list is sorted and deduplicated", () => {
     const registry = buildRegistry(
       { imagemagick: { tool: "imagemagick", ...fakeConverter } },

@@ -1,4 +1,4 @@
-import { normalizeFiletype } from "./normalizeFiletype";
+import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
 import type { ToolName, Toolchain } from "./toolchain";
 import type { ExecFileFn } from "./types";
 
@@ -36,10 +36,28 @@ export interface Registry {
   available(): ResolvedConverter[];
 }
 
-function flatten(formats: Record<string, string[]>): Set<string> {
+/**
+ * Input formats are folded with normalizeFiletype (jpg -> jpeg), because that
+ * is the spelling converters match on when deciding what they accept.
+ */
+function flattenInputs(formats: Record<string, string[]>): Set<string> {
   const out = new Set<string>();
   for (const list of Object.values(formats)) {
     for (const format of list) out.add(normalizeFiletype(format));
+  }
+  return out;
+}
+
+/**
+ * Output formats are folded with normalizeOutputFiletype (jpeg -> jpg),
+ * because these strings are BOTH what the picker shows the user and what the
+ * produced file is named. Using the input normalizer here would offer "jpeg"
+ * in the UI and then write a file called ".jpg".
+ */
+function flattenOutputs(formats: Record<string, string[]>): Set<string> {
+  const out = new Set<string>();
+  for (const list of Object.values(formats)) {
+    for (const format of list) out.add(normalizeOutputFiletype(format));
   }
   return out;
 }
@@ -61,8 +79,8 @@ export function buildRegistry(
 
   const index = available.map((converter) => ({
     converter,
-    from: flatten(converter.properties.from),
-    to: flatten(converter.properties.to),
+    from: flattenInputs(converter.properties.from),
+    to: flattenOutputs(converter.properties.to),
   }));
 
   return {
@@ -78,7 +96,9 @@ export function buildRegistry(
 
     converterFor(input, output) {
       const from = normalizeFiletype(input);
-      const to = normalizeFiletype(output);
+      // Normalize the requested output the same way the `to` set was built, so
+      // that both "jpg" and "jpeg" from a caller route to the same converter.
+      const to = normalizeOutputFiletype(output);
       for (const entry of index) {
         if (entry.from.has(from) && entry.to.has(to)) return entry.converter;
       }
