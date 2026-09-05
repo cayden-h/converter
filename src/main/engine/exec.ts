@@ -94,3 +94,23 @@ export function toCommandMap(toolchain: Toolchain): CommandMap {
   }
   return commands;
 }
+
+/**
+ * ffmpeg's lifted converter takes node's real argument order,
+ * (cmd, args, options, callback), rather than ExecFileFn's
+ * (cmd, args, callback, options). Upstream's own comment explains why: node
+ * ignores an options object placed after the callback.
+ *
+ * This adapts our wrapper to that shape so ffmpeg still gets absolute-path
+ * resolution, shell stripping and the maxBuffer default.
+ */
+export type FfmpegExecFile = (
+  cmd: string,
+  args: string[],
+  options: object,
+  callback: (err: Error | null, stdout: string, stderr: string) => void,
+) => unknown;
+
+export function toFfmpegExecFile(execFile: ExecFileFn): FfmpegExecFile {
+  return (cmd, args, options, callback) => execFile(cmd, args, callback, options as never);
+}

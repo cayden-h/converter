@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createExecFile, toCommandMap, nodeSpawn } from "../../src/main/engine/exec";
+import { createExecFile, toCommandMap, nodeSpawn, toFfmpegExecFile } from "../../src/main/engine/exec";
 
 describe("createExecFile", () => {
   test("rewrites a bare command name to the resolved absolute path", () => {
@@ -217,5 +217,40 @@ describe("nodeSpawn (the real child_process adapter)", () => {
       nodeSpawn("/bin/echo", ["hello"], (_e, out) => resolve(out));
     });
     expect(stdout.trim()).toBe("hello");
+  });
+});
+
+describe("toFfmpegExecFile", () => {
+  test("reorders arguments and still resolves the absolute path", () => {
+    // ffmpeg's converter uses node's real (cmd, args, options, callback)
+    // order. Handing it our ExecFileFn directly would put the callback where
+    // node expects options, and the options would be silently dropped - the
+    // exact bug this project already fixed once.
+    let seen: { cmd: string; opts: unknown; calledBack: boolean } = {
+      cmd: "",
+      opts: undefined,
+      calledBack: false,
+    };
+    const base = createExecFile({ ffmpeg: "/opt/homebrew/bin/ffmpeg" }, (cmd, _a, cb, opts) => {
+      seen.cmd = cmd;
+      seen.opts = opts;
+      cb(null, "", "");
+    });
+    const ffmpegExec = toFfmpegExecFile(base);
+    ffmpegExec("ffmpeg", ["-i", "a.mov", "b.mp4"], { maxBuffer: 999 }, () => {
+      seen.calledBack = true;
+    });
+    expect(seen.cmd).toBe("/opt/homebrew/bin/ffmpeg");
+    expect((seen.opts as { maxBuffer?: number }).maxBuffer).toBe(999);
+    expect(seen.calledBack).toBe(true);
+  });
+
+  test("surfaces a missing tool through the callback", async () => {
+    const ffmpegExec = toFfmpegExecFile(createExecFile({}));
+    const err = await new Promise<Error | null>((resolve) => {
+      ffmpegExec("ffmpeg", [], {}, (e) => resolve(e));
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("ffmpeg");
   });
 });
