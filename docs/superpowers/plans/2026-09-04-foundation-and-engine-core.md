@@ -213,7 +213,12 @@ Resolves a logical tool name to an absolute executable path. This is the ONLY fi
 
 ```ts
 import { describe, expect, test } from "vitest";
-import { resolveTool, KNOWN_TOOLS } from "../../src/main/engine/toolchain";
+import {
+  resolveTool,
+  detectToolchain,
+  isSupportedPlatform,
+  KNOWN_TOOLS,
+} from "../../src/main/engine/toolchain";
 
 describe("resolveTool", () => {
   test("returns the bundled path when the bundled binary exists", () => {
@@ -294,6 +299,54 @@ describe("resolveTool", () => {
       expect(spec.binary, `${name} must declare a binary`).toBeTruthy();
     }
   });
+
+  test("tries the second system path when the first is absent", () => {
+    // Without this, code that ignored `exists` and always returned
+    // systemPaths[0], or that iterated in reverse, would still pass every
+    // other test in this file. This is the only case that exercises the loop
+    // past its first iteration.
+    const result = resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/usr/local/bin/magick",
+    });
+    expect(result).toBe("/usr/local/bin/magick");
+  });
+});
+
+describe("detectToolchain", () => {
+  test("omits tools that did not resolve rather than storing null", () => {
+    // exec.ts does a truthy check on these entries, so an unresolved tool must
+    // be ABSENT from the map, not present with a null value.
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/ffmpeg",
+    });
+    expect(toolchain).toEqual({ ffmpeg: "/opt/homebrew/bin/ffmpeg" });
+    expect("imagemagick" in toolchain).toBe(false);
+  });
+
+  test("resolves every known tool when all are present", () => {
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: () => true,
+    });
+    expect(Object.keys(toolchain).sort()).toEqual(Object.keys(KNOWN_TOOLS).sort());
+  });
+});
+
+describe("isSupportedPlatform", () => {
+  test("accepts darwin and win32, rejects everything else", () => {
+    expect(isSupportedPlatform("darwin")).toBe(true);
+    expect(isSupportedPlatform("win32")).toBe(true);
+    expect(isSupportedPlatform("linux")).toBe(false);
+    expect(isSupportedPlatform("Darwin")).toBe(false);
+  });
 });
 ```
 
@@ -361,8 +414,15 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
 };
 
+/** The only platforms this app resolves tools for. Linux is out of scope. */
+export type SupportedPlatform = "darwin" | "win32";
+
+export function isSupportedPlatform(platform: string): platform is SupportedPlatform {
+  return platform === "darwin" || platform === "win32";
+}
+
 export interface ResolveOptions {
-  platform: string;
+  platform: SupportedPlatform;
   arch: string;
   bundleDir: string;
   exists?: (p: string) => boolean;
@@ -410,7 +470,7 @@ export function detectToolchain(options: ResolveOptions): Toolchain {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/toolchain.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1492,7 +1552,13 @@ import path from "node:path";
 import { convert as convertImagemagick, properties as propertiesImagemagick } from "./converters/imagemagick";
 import { JobRunner } from "./job";
 import { buildRegistry, type ConverterEntry, type Registry } from "./registry";
-import { detectToolchain, KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
+import {
+  detectToolchain,
+  isSupportedPlatform,
+  KNOWN_TOOLS,
+  type ToolName,
+  type Toolchain,
+} from "./toolchain";
 import type { CommandMap } from "./exec";
 
 const CONVERTERS: Record<string, ConverterEntry> = {
@@ -1510,6 +1576,13 @@ export interface Engine {
 }
 
 export function createEngine(bundleDir: string): Engine {
+  // ResolveOptions.platform is narrowed to the platforms we actually ship, so
+  // an unsupported OS fails here with a clear message instead of silently
+  // resolving macOS paths.
+  if (!isSupportedPlatform(process.platform)) {
+    throw new Error(`Unsupported platform: ${process.platform}`);
+  }
+
   const toolchain = detectToolchain({
     platform: process.platform,
     arch: process.arch,
@@ -1907,7 +1980,7 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 42 tests across 7 files: toolchain 7, exec 7, imagemagick 6, registry 8, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 46 tests across 7 files: toolchain 11, exec 7, imagemagick 6, registry 8, job 6, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
