@@ -32,6 +32,7 @@ export const IPC = {
   outputsFor: "converter:outputsFor",
   groupedOutputsFor: "converter:groupedOutputsFor",
   run: "converter:run",
+  cancel: "converter:cancel",
   reveal: "converter:reveal",
   progress: "converter:progress",
 } as const;
@@ -41,6 +42,7 @@ export interface ConverterApi {
   outputsFor(extension: string): Promise<string[]>;
   groupedOutputsFor(extension: string): Promise<FormatGroup[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
+  cancel(): Promise<void>;
   reveal(path: string): Promise<void>;
   /** Subscribe to conversion progress. Returns an unsubscribe function. */
   onProgress(handler: (update: ProgressUpdate) => void): () => void;

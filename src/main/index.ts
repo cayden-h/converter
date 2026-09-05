@@ -60,6 +60,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle(IPC.run, (_event, items: ConvertRequest[]) => engine.runner.run(items));
 
+  ipcMain.handle(IPC.cancel, () => {
+    engine.runner.cancel();
+  });
+
   ipcMain.handle(IPC.reveal, (_event, target: string) => {
     shell.showItemInFolder(target);
   });

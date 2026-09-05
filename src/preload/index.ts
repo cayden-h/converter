@@ -6,6 +6,7 @@ const api: ConverterApi = {
   outputsFor: (extension: string) => ipcRenderer.invoke(IPC.outputsFor, extension),
   groupedOutputsFor: (extension: string) => ipcRenderer.invoke(IPC.groupedOutputsFor, extension),
   run: (items: ConvertRequest[]) => ipcRenderer.invoke(IPC.run, items),
+  cancel: () => ipcRenderer.invoke(IPC.cancel),
   reveal: (target: string) => ipcRenderer.invoke(IPC.reveal, target),
   onProgress: (handler: (update: ProgressUpdate) => void) => {
     const listener = (_event: unknown, update: ProgressUpdate) => handler(update);

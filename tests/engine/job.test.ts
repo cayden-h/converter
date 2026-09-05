@@ -283,4 +283,67 @@ describe("JobRunner", () => {
     await runner.run([{ path: "/in/clip.mov", output: "av1.mp4" }]);
     expect(seenConvertTo).toBe("av1.mp4");
   });
+
+  test("cancel stops queued files from starting", async () => {
+    let started = 0;
+    const runner = new JobRunner(
+      registryWith(async () => {
+        started += 1;
+        await new Promise((r) => setTimeout(r, 20));
+        return "Done";
+      }),
+      {
+        commands: { magick: "/bin/magick" },
+        outputDirFor: () => "/out",
+        outputExists: () => true,
+        concurrency: 1,
+      },
+    );
+    const items = Array.from({ length: 6 }, (_, i) => ({ path: `/in/${i}.png`, output: "jpg" }));
+    const running = runner.run(items);
+    setTimeout(() => runner.cancel(), 25);
+    const results = await running;
+    expect(started).toBeLessThan(items.length);
+    expect(results.some((r) => !r.ok)).toBe(true);
+  });
+
+  test("cancel kills a child process that is already running", async () => {
+    let killed = false;
+    const fakeChild = { kill: () => { killed = true; }, on: () => {} };
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "imagemagick",
+          priority: 10,
+          properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+          convert: (_f, _t, _c, _p, _o, execFileOverride) =>
+            new Promise<string>(() => {
+              execFileOverride?.("magick", [], () => {});
+            }),
+        },
+      },
+      { imagemagick: "/bin/magick" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+      outputExists: () => true,
+      spawn: () => fakeChild as never,
+    });
+    const running = runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    setTimeout(() => runner.cancel(), 20);
+    await running;
+    expect(killed, "an in-flight child must be killed on cancel").toBe(true);
+  });
+
+  test("a fresh run after cancel is not still cancelled", async () => {
+    const runner = new JobRunner(registryWith(async () => "Done"), {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+      outputExists: () => true,
+    });
+    runner.cancel();
+    const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    expect(results[0]?.ok, "cancel must not poison later runs").toBe(true);
+  });
 });
