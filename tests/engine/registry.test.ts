@@ -3,6 +3,7 @@ import { buildRegistry } from "../../src/main/engine/registry";
 import { normalizeOutputFiletype } from "../../src/main/engine/normalizeFiletype";
 
 const fakeConverter = {
+  priority: 10,
   properties: {
     from: { images: ["png", "jpeg", "heic"] },
     to: { images: ["png", "jpeg", "webp"] },
@@ -115,5 +116,75 @@ describe("buildRegistry", () => {
     );
     const outputs = registry.outputsFor("png");
     expect(outputs).toEqual([...new Set(outputs)].sort());
+  });
+
+  test("prefers the higher-priority converter when both claim a pair", () => {
+    // ImageMagick and ffmpeg overlap on 45 output formats. Without an explicit
+    // policy this is decided by Object.entries() order, which is invisible and
+    // silently reorderable by anyone editing the converters record.
+    const stills = {
+      tool: "imagemagick" as const,
+      priority: 10,
+      properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
+      convert: async () => "stills",
+    };
+    const motion = {
+      tool: "ffmpeg" as const,
+      priority: 20,
+      properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
+      convert: async () => "motion",
+    };
+    const registry = buildRegistry(
+      { imagemagick: stills, ffmpeg: motion },
+      { imagemagick: "/bin/magick", ffmpeg: "/bin/ffmpeg" },
+    );
+    expect(registry.converterFor("gif", "png")?.name).toBe("ffmpeg");
+  });
+
+  test("priority beats declaration order in both directions", () => {
+    // Same two converters, reversed in the record. If the result changed, the
+    // policy would still secretly be insertion order.
+    const stills = {
+      tool: "imagemagick" as const,
+      priority: 10,
+      properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
+      convert: async () => "stills",
+    };
+    const motion = {
+      tool: "ffmpeg" as const,
+      priority: 20,
+      properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
+      convert: async () => "motion",
+    };
+    const forward = buildRegistry(
+      { imagemagick: stills, ffmpeg: motion },
+      { imagemagick: "/bin/magick", ffmpeg: "/bin/ffmpeg" },
+    );
+    const reversed = buildRegistry(
+      { ffmpeg: motion, imagemagick: stills },
+      { imagemagick: "/bin/magick", ffmpeg: "/bin/ffmpeg" },
+    );
+    expect(forward.converterFor("gif", "png")?.name).toBe("ffmpeg");
+    expect(reversed.converterFor("gif", "png")?.name).toBe("ffmpeg");
+  });
+
+  test("falls back to the available converter when the preferred tool is missing", () => {
+    const stills = {
+      tool: "imagemagick" as const,
+      priority: 10,
+      properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
+      convert: async () => "stills",
+    };
+    const motion = {
+      tool: "ffmpeg" as const,
+      priority: 20,
+      properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
+      convert: async () => "motion",
+    };
+    const registry = buildRegistry(
+      { imagemagick: stills, ffmpeg: motion },
+      { imagemagick: "/bin/magick" },
+    );
+    expect(registry.converterFor("gif", "png")?.name).toBe("imagemagick");
   });
 });

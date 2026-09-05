@@ -7,6 +7,7 @@ function registryWith(convert: () => Promise<string>) {
     {
       fake: {
         tool: "imagemagick",
+        priority: 10,
         // "jpeg" is included alongside "png" so the collision test below can
         // route both a.png and a.jpeg to jpg without an unrelated routing
         // failure masking the collision behavior under test.
@@ -106,6 +107,7 @@ describe("JobRunner", () => {
       {
         fake: {
           tool: "imagemagick",
+          priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           convert: async (_f, _t, _c, _p, _o, execFileOverride) => {
             sawOverride = execFileOverride;
@@ -167,6 +169,7 @@ describe("JobRunner", () => {
       {
         fake: {
           tool: "imagemagick",
+          priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           // Never settles, so the timeout always wins the race.
           convert: (_f, _t, _c, _p, _o, execFileOverride) =>
@@ -196,6 +199,7 @@ describe("JobRunner", () => {
       {
         fake: {
           tool: "imagemagick",
+          priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           convert: async (_f, fileType) => {
             seenType = fileType;

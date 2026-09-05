@@ -10,6 +10,12 @@ export interface ConverterProperties {
 export interface ConverterEntry {
   /** The tool this converter shells out to. */
   tool: ToolName;
+  /**
+   * Higher wins when more than one converter claims the same from/to pair.
+   * ImageMagick and ffmpeg overlap on 45 output formats, so this must be an
+   * explicit decision rather than a side effect of declaration order.
+   */
+  priority: number;
   properties: ConverterProperties;
   convert: (
     filePath: string,
@@ -77,11 +83,13 @@ export function buildRegistry(
     }
   }
 
-  const index = available.map((converter) => ({
-    converter,
-    from: flattenInputs(converter.properties.from),
-    to: flattenOutputs(converter.properties.to),
-  }));
+  const index = available
+    .map((converter) => ({
+      converter,
+      from: flattenInputs(converter.properties.from),
+      to: flattenOutputs(converter.properties.to),
+    }))
+    .sort((a, b) => b.converter.priority - a.converter.priority);
 
   return {
     outputsFor(input) {

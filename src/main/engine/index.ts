@@ -14,6 +14,7 @@ import { toCommandMap } from "./exec";
 const CONVERTERS: Record<string, ConverterEntry> = {
   imagemagick: {
     tool: "imagemagick",
+    priority: 10,
     properties: propertiesImagemagick,
     convert: convertImagemagick,
   },
