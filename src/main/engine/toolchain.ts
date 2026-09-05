@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 export type ToolName = "imagemagick" | "ffmpeg" | "ffprobe" | "poppler" | "pandoc";
@@ -63,6 +64,74 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
     },
   },
 };
+
+/**
+ * Tools this app can DETECT but does not route conversions through.
+ *
+ * They are reported by the Formats panel so a user can see why a format is
+ * unavailable, but they deliberately do NOT live in KNOWN_TOOLS: putting them
+ * there would make the registry advertise converters that do not exist.
+ *
+ * Their paths live here because this file is the single home for
+ * platform-specific paths - see the rule on ToolSpec above.
+ */
+export const DETECTABLE_TOOLS: Record<string, ToolSpec> = {
+  libreoffice: {
+    binary: "soffice",
+    binaries: ["soffice"],
+    systemPaths: {
+      darwin: [
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/opt/homebrew/bin/soffice",
+        "/usr/local/bin/soffice",
+      ],
+      win32: ["C:\\Program Files\\LibreOffice\\program\\soffice.exe"],
+    },
+  },
+  calibre: {
+    binary: "ebook-convert",
+    binaries: ["ebook-convert"],
+    systemPaths: {
+      darwin: [
+        "/Applications/calibre.app/Contents/MacOS/ebook-convert",
+        "/opt/homebrew/bin/ebook-convert",
+      ],
+      win32: ["C:\\Program Files\\Calibre2\\ebook-convert.exe"],
+    },
+  },
+  inkscape: {
+    binary: "inkscape",
+    binaries: ["inkscape"],
+    systemPaths: {
+      darwin: [
+        "/Applications/Inkscape.app/Contents/MacOS/inkscape",
+        "/opt/homebrew/bin/inkscape",
+      ],
+      win32: ["C:\\Program Files\\Inkscape\\bin\\inkscape.exe"],
+    },
+  },
+  vtracer: {
+    binary: "vtracer",
+    binaries: ["vtracer"],
+    // A Rust crate, not a Homebrew formula: cargo installs to ~/.cargo/bin.
+    systemPaths: {
+      darwin: [path.join(homedir(), ".cargo", "bin", "vtracer"), "/opt/homebrew/bin/vtracer"],
+      win32: [path.join(homedir(), ".cargo", "bin", "vtracer.exe")],
+    },
+  },
+};
+
+export function resolveDetectable(name: string, options: ResolveOptions): string | null {
+  const spec = DETECTABLE_TOOLS[name];
+  if (!spec) return null;
+  const exists = options.exists ?? existsSync;
+  const candidates =
+    options.platform === "win32" ? spec.systemPaths.win32 : spec.systemPaths.darwin;
+  for (const candidate of candidates) {
+    if (exists(candidate)) return candidate;
+  }
+  return null;
+}
 
 /** The only platforms this app resolves tools for. Linux is out of scope. */
 export type SupportedPlatform = "darwin" | "win32";

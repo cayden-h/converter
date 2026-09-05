@@ -1,8 +1,29 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { createEngine, CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
 import { properties as imagemagick } from "../../src/main/engine/converters/imagemagick";
 import { properties as ffmpeg } from "../../src/main/engine/converters/ffmpeg";
 import { mediumOf } from "../../src/main/engine/media";
+
+/** Recursively yields .ts/.tsx files under `dir`, skipping node_modules/out. */
+function* walk(dir: string): Generator<string> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name === "out") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      yield* walk(full);
+    } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
+      yield full;
+    }
+  }
+}
 
 function flatten(formats: Record<string, string[]>): Set<string> {
   return new Set(Object.values(formats).flat());
@@ -92,5 +113,22 @@ describe("format classification coverage", () => {
     ];
     const unclassified = common.filter((f) => mediumOf(f) === "Other");
     expect(unclassified, `unclassified: ${unclassified.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("portability rule 1", () => {
+  test("no platform path exists outside toolchain.ts", () => {
+    // Portability rule 1. A second home for these paths means a Windows port
+    // silently misses one. This caught formatsPanel.ts once already.
+    const offenders: string[] = [];
+    const roots = ["src/main", "src/renderer", "src/preload", "src/shared"];
+    const pattern = /\/opt\/homebrew|\/usr\/local\/bin|\/Applications\/|Program Files|\.cargo\/bin/;
+    for (const root of roots) {
+      for (const file of walk(root)) {
+        if (file.endsWith("engine/toolchain.ts")) continue;
+        if (pattern.test(readFileSync(file, "utf8"))) offenders.push(file);
+      }
+    }
+    expect(offenders, `platform paths outside toolchain.ts: ${offenders.join(", ")}`).toEqual([]);
   });
 });
