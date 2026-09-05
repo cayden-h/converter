@@ -892,7 +892,13 @@ Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Register it**
 
-In `src/main/engine/index.ts` add to `CONVERTERS`:
+In `src/main/engine/index.ts`, add the import:
+
+```ts
+import { convert as convertPoppler, properties as propertiesPoppler } from "./converters/poppler";
+```
+
+and add to `CONVERTERS`:
 
 ```ts
   // Highest priority for PDF input: ImageMagick can read PDFs only through a
@@ -1056,6 +1062,15 @@ git commit -m "test: add real ffmpeg and poppler integration coverage"
 ```
 
 ---
+
+## Verified before writing this plan
+
+These were checked against the real binaries on this machine, so treat them as settled:
+
+- `normalizeOutputFiletype("av1.mp4")` returns `"av1.mp4"` unchanged - compound formats survive normalization, which is why `outputExtension` must split on the LAST dot rather than trusting the normalizer.
+- `pdftoppm -png -f 1 -l 1 -singlefile in.pdf out` produces exactly `out.png`. Without `-singlefile` it would append a page number.
+- `pdftotext in.pdf out.txt` produces `out.txt` directly.
+- ImageMagick and ffmpeg overlap on 43 input and 45 output formats; ffmpeg advertises 7 compound outputs.
 
 ## Definition of Done
 
