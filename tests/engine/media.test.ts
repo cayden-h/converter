@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mediumOf, MEDIA_GROUP_ORDER } from "../../src/main/engine/media";
+import { mediumOf, isOfferable, MEDIA_GROUP_ORDER } from "../../src/main/engine/media";
 
 describe("mediumOf", () => {
   test.each([
@@ -37,4 +37,36 @@ describe("mediumOf", () => {
     expect(MEDIA_GROUP_ORDER).toContain("Images");
     expect(MEDIA_GROUP_ORDER[MEDIA_GROUP_ORDER.length - 1]).toBe("Other");
   });
+});
+
+describe("isOfferable", () => {
+  test.each(["null", "clipboard", "histogram", "info", "mask", "matte", "inline", "data"])(
+    "hides the ImageMagick pseudo-format %s",
+    (format) => {
+      // These are not files. Offering "convert to null" is a bug, not a feature.
+      expect(isOfferable(format)).toBe(false);
+    },
+  );
+
+  test.each(["264", "265", "266", "h261", "h263", "hevc", "vc1", "obu"])(
+    "hides the codec-only muxer name %s",
+    (format) => {
+      expect(isOfferable(format)).toBe(false);
+    },
+  );
+
+  test.each(["png8", "png24", "png32", "bmp2", "bmp3", "eps2", "eps3", "gif87"])(
+    "hides the variant spelling %s",
+    (format) => {
+      // The canonical spelling is already offered; these only add noise.
+      expect(isOfferable(format)).toBe(false);
+    },
+  );
+
+  test.each(["png", "jpg", "mp4", "mp3", "pdf", "svg", "epub", "csv", "srt"])(
+    "offers the real format %s",
+    (format) => {
+      expect(isOfferable(format)).toBe(true);
+    },
+  );
 });

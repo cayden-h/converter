@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createEngine, CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
 import { properties as imagemagick } from "../../src/main/engine/converters/imagemagick";
 import { properties as ffmpeg } from "../../src/main/engine/converters/ffmpeg";
-import { mediumOf } from "../../src/main/engine/media";
+import { mediumOf, isOfferable } from "../../src/main/engine/media";
 
 function flatten(formats: Record<string, string[]>): Set<string> {
   return new Set(Object.values(formats).flat());
@@ -50,6 +50,16 @@ describe("real routing", () => {
     for (const [name, entry] of Object.entries(CONVERTERS)) {
       expect(entry.priority, `${name} must declare a priority`).toBeDefined();
     }
+  });
+
+  test("the offerable set is a usable size, not the whole raw table", () => {
+    // A picker listing every raw format is unusable. This is a guard against
+    // the junk creeping back, not an exact target.
+    const engine = createEngine("/nonexistent-bundle-dir");
+    const all = engine.registry.outputsFor("png");
+    const offerable = all.filter(isOfferable);
+    expect(offerable.length).toBeGreaterThan(40);
+    expect(offerable.length).toBeLessThan(all.length / 2);
   });
 });
 

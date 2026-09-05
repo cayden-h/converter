@@ -1,5 +1,5 @@
 import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
-import { mediumOf, MEDIA_GROUP_ORDER, type Medium } from "./media";
+import { mediumOf, isOfferable, MEDIA_GROUP_ORDER, type Medium } from "./media";
 import type { ToolName, Toolchain } from "./toolchain";
 import type { ExecFileFn } from "./types";
 
@@ -118,7 +118,7 @@ export function buildRegistry(
     },
 
     groupedOutputsFor(input) {
-      const outputs = computeOutputsFor(input);
+      const outputs = computeOutputsFor(input).filter(isOfferable);
       const groups = new Map<Medium, string[]>();
       for (const format of outputs) {
         const medium = mediumOf(format);
