@@ -23,6 +23,7 @@ describe("JobRunner", () => {
     const runner = new JobRunner(registryWith(async () => "Done"), {
       commands: { magick: "/bin/magick" },
       outputDirFor: () => "/out",
+      outputExists: () => true,
     });
     const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
     expect(results[0]?.ok).toBe(true);
@@ -37,7 +38,7 @@ describe("JobRunner", () => {
         if (call === 1) throw new Error("boom");
         return "Done";
       }),
-      { commands: { magick: "/bin/magick" }, outputDirFor: () => "/out" },
+      { commands: { magick: "/bin/magick" }, outputDirFor: () => "/out", outputExists: () => true },
     );
     const results = await runner.run([
       { path: "/in/a.png", output: "jpg" },
@@ -62,6 +63,7 @@ describe("JobRunner", () => {
     const runner = new JobRunner(registryWith(async () => "Done"), {
       commands: { magick: "/bin/magick" },
       outputDirFor: () => "/out",
+      outputExists: () => true,
     });
     const seen: string[] = [];
     runner.on("progress", (e) => seen.push(e.status));
@@ -81,7 +83,12 @@ describe("JobRunner", () => {
         active -= 1;
         return "Done";
       }),
-      { commands: { magick: "/bin/magick" }, outputDirFor: () => "/out", concurrency: 2 },
+      {
+        commands: { magick: "/bin/magick" },
+        outputDirFor: () => "/out",
+        concurrency: 2,
+        outputExists: () => true,
+      },
     );
     await runner.run(
       Array.from({ length: 6 }, (_, i) => ({ path: `/in/${i}.png`, output: "jpg" })),
@@ -111,6 +118,7 @@ describe("JobRunner", () => {
     const runner = new JobRunner(registry, {
       commands: { magick: "/bin/magick" },
       outputDirFor: () => "/out",
+      outputExists: () => true,
     });
     await runner.run([{ path: "/in/a.png", output: "jpg" }]);
     expect(typeof sawOverride).toBe("function");
@@ -136,6 +144,7 @@ describe("JobRunner", () => {
     const runner = new JobRunner(registryWith(async () => "Done"), {
       commands: { magick: "/bin/magick" },
       outputDirFor: () => "/out",
+      outputExists: () => true,
     });
     const results = await runner.run([
       { path: "/in/a.png", output: "jpg" },
@@ -199,8 +208,23 @@ describe("JobRunner", () => {
     const runner = new JobRunner(registry, {
       commands: { magick: "/bin/magick" },
       outputDirFor: () => "/out",
+      outputExists: () => true,
     });
     await runner.run([{ path: "/in/PHOTO.PNG", output: "jpg" }]);
     expect(seenType).toBe("png");
+  });
+
+  test("fails when the converter claims success but wrote no file", async () => {
+    // Real case: `magick in.png out.mp4` exits 0 and writes nothing when its
+    // ffmpeg delegate is missing, so the lifted converter resolves "Done".
+    // Trusting that would report a Done row with a Reveal button pointing at
+    // a file that does not exist.
+    const runner = new JobRunner(registryWith(async () => "Done"), {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+    });
+    const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    expect(results[0]?.ok).toBe(false);
+    expect(results[0]?.error).toMatch(/no output|not (?:be )?(?:created|written)/i);
   });
 });

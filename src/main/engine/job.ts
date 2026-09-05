@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
+import { existsSync, statSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { createExecFile, nodeSpawn, type CommandMap } from "./exec";
 import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
@@ -31,10 +32,20 @@ export interface JobRunnerOptions {
   timeoutMs?: number;
   /** Injectable for tests. Defaults to the real child_process adapter. */
   spawn?: ExecFileFn;
+  /** Injectable for tests. Defaults to a real filesystem check. */
+  outputExists?: (outputPath: string) => boolean;
 }
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * A converter resolving successfully is not proof it wrote anything.
+ * ImageMagick exits 0 when a delegate fails, producing no file at all.
+ */
+function outputWasWritten(outputPath: string): boolean {
+  return existsSync(outputPath) && statSync(outputPath).size > 0;
+}
 
 export class JobRunner extends EventEmitter {
   constructor(
@@ -139,6 +150,14 @@ export class JobRunner extends EventEmitter {
         converter.convert(item.path, inputType, item.output, outputPath, {}, execFile),
         timeout,
       ]);
+
+      const exists = this.options.outputExists ?? outputWasWritten;
+      if (!exists(outputPath)) {
+        const error = `Converter reported success but no output was written to ${outputPath}`;
+        this.emit("progress", { path: item.path, status: "failed", error } as ProgressEvent);
+        return { path: item.path, ok: false, error };
+      }
+
       this.emit("progress", { path: item.path, status: "done" } as ProgressEvent);
       return { path: item.path, ok: true, outputPath };
     } catch (cause) {
