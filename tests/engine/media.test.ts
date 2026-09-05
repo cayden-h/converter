@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mediumOf, isOfferable, MEDIA_GROUP_ORDER } from "../../src/main/engine/media";
+import { mediumOf, isOfferable, MEDIA_GROUP_ORDER, reachableMedia } from "../../src/main/engine/media";
 import { MEDIA_GROUP_ORDER as sharedOrder } from "../../src/shared/media";
 
 test("the engine re-exports the shared ordering rather than redefining it", () => {
@@ -36,11 +36,15 @@ describe("mediumOf", () => {
   });
 
   test("every group in the display order is reachable", () => {
-    // A group nothing maps to would render as a permanently empty heading.
-    const reachable = new Set(MEDIA_GROUP_ORDER.map((g) => g));
-    expect(reachable.size).toBe(MEDIA_GROUP_ORDER.length);
-    expect(MEDIA_GROUP_ORDER).toContain("Images");
-    expect(MEDIA_GROUP_ORDER[MEDIA_GROUP_ORDER.length - 1]).toBe("Other");
+    // The previous version of this test never called mediumOf - it only
+    // checked MEDIA_GROUP_ORDER had no duplicates. Adding a medium that
+    // nothing maps to left it green while the picker rendered a permanently
+    // empty heading. Assert the real property against the real lookup table.
+    const reachable = reachableMedia();
+    const unreachable = MEDIA_GROUP_ORDER.filter(
+      (medium) => medium !== "Other" && !reachable.has(medium),
+    );
+    expect(unreachable, `media with no formats mapped: ${unreachable.join(", ")}`).toEqual([]);
   });
 });
 

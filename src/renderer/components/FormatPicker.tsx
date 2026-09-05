@@ -70,15 +70,25 @@ export function FormatPicker({ perFileGroups, value, onChange }: FormatPickerPro
 
   useEffect(() => {
     setHighlighted(0);
-  }, [query, perFileGroups]);
+  }, [query, perFileGroups, showOther]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setHighlighted((index) => Math.min(index + 1, Math.max(flatList.length - 1, 0)));
+      setHighlighted((index) => {
+        for (let next = index + 1; next < flatList.length; next++) {
+          if (flatList[next]?.enabled) return next;
+        }
+        return index;
+      });
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setHighlighted((index) => Math.max(index - 1, 0));
+      setHighlighted((index) => {
+        for (let next = index - 1; next >= 0; next--) {
+          if (flatList[next]?.enabled) return next;
+        }
+        return index;
+      });
     } else if (event.key === "Enter") {
       event.preventDefault();
       const item = flatList[highlighted];

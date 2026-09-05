@@ -62,6 +62,11 @@ export function mediumOf(format: string): Medium {
   return LOOKUP.get(format.toLowerCase()) ?? "Other";
 }
 
+/** Every medium that at least one format maps to. Exported for the reachability test. */
+export function reachableMedia(): Set<Medium> {
+  return new Set(LOOKUP.values());
+}
+
 /**
  * Formats that are reachable but should never appear in the picker.
  *

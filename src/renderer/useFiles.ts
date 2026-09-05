@@ -15,6 +15,21 @@ function toQueuedFile(path: string): QueuedFile {
   return { id: path, path, name, extension };
 }
 
+/**
+ * Merges newly dropped/picked paths into the existing queue, deduplicating by
+ * path. Pure so it can be unit tested without a React renderer.
+ */
+export function addPaths(existing: QueuedFile[], incoming: string[]): QueuedFile[] {
+  const seen = new Set(existing.map((file) => file.path));
+  const additions: QueuedFile[] = [];
+  for (const path of incoming) {
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    additions.push(toQueuedFile(path));
+  }
+  return additions.length > 0 ? [...existing, ...additions] : existing;
+}
+
 export interface UseFilesResult {
   files: QueuedFile[];
   /** Adds absolute paths, deduplicating against files already in the list. */
@@ -27,11 +42,7 @@ export function useFiles(): UseFilesResult {
   const [files, setFiles] = useState<QueuedFile[]>([]);
 
   const add = useCallback((paths: string[]) => {
-    setFiles((prev) => {
-      const existing = new Set(prev.map((file) => file.path));
-      const additions = paths.filter((path) => path && !existing.has(path)).map(toQueuedFile);
-      return additions.length > 0 ? [...prev, ...additions] : prev;
-    });
+    setFiles((prev) => addPaths(prev, paths));
   }, []);
 
   const remove = useCallback((id: string) => {
