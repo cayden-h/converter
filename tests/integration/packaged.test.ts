@@ -18,6 +18,19 @@
  * it there - no such machine was available when this test was written, so
  * that verification has NOT been done. Do not read a pass here as "verified
  * to work without Homebrew" - it is not.
+ *
+ * On WINDOWS the main caveat above mostly lifts, and the note is stronger
+ * rather than weaker. This suite runs on a GitHub `windows-latest` runner,
+ * a fresh machine where ImageMagick, ffmpeg, poppler, resvg, dasel and
+ * potrace were never installed. A pass there is real evidence that the
+ * bundle is self-contained.
+ *
+ * Two honest limits remain. Pandoc IS preinstalled on GitHub's Windows
+ * runners, so for that one tool the "clean machine" argument does not apply
+ * and the in-bundle path assertion below is doing all the work. And no
+ * automated test on any platform checks what the WINDOW looks like - the
+ * macOS-only chrome guard in src/main/windowOptions.ts is verified by a
+ * human on a real desktop or not at all.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,14 +39,26 @@ import { afterAll, describe, expect, test } from "vitest";
 import { createEngine } from "../../src/main/engine";
 import { ensureCsvFixture, ensurePngFixtureWith } from "../fixtures/make-fixtures";
 
-const APP_PATH = path.join(__dirname, "..", "..", "release", "mac-arm64", "Converter.app");
-const BUNDLE_BIN = path.join(APP_PATH, "Contents", "Resources", "bin");
+// electron-builder writes each platform's unpacked build to its own
+// directory. Both layouts put the vendored tools under a "bin" directory
+// inside the packaged resources, which is what BUNDLE_BIN points at and what
+// the in-bundle assertion below checks against.
+const APP_PATH =
+  process.platform === "win32"
+    ? path.join(__dirname, "..", "..", "release", "win-unpacked")
+    : path.join(__dirname, "..", "..", "release", "mac-arm64", "Converter.app");
+
+const BUNDLE_BIN =
+  process.platform === "win32"
+    ? path.join(APP_PATH, "resources", "bin")
+    : path.join(APP_PATH, "Contents", "Resources", "bin");
 
 const appExists = existsSync(APP_PATH);
 
-// The app must be built first: `npx electron-builder --mac --dir`. That build
-// takes minutes, so it is not run as part of this test - if it is missing,
-// skip honestly rather than fabricate a pass.
+// The app must be built first: `npx electron-builder --mac --dir` on macOS,
+// `npx electron-builder --win --dir` on Windows. That build takes minutes, so
+// it is not run as part of this test - if it is missing, skip honestly rather
+// than fabricate a pass.
 describe.skipIf(!appExists)("packaged app: real conversions from bundled binaries only", () => {
   const engine = createEngine(BUNDLE_BIN);
 
