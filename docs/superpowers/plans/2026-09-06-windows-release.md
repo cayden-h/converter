@@ -30,6 +30,8 @@
 | `.github/workflows/release.yml` | **Create.** Publish on `v*` tag and `workflow_dispatch`. |
 | `README.md` | **Modify.** Windows install section and the SmartScreen note. |
 
+**Strictness note, true of every code block in this plan:** `tsconfig.node.json` sets `strict` and `noUncheckedIndexedAccess`, and its `include` covers `tests/**/*`, which imports `scripts/*.ts` — so both new script files are type-checked by `npm run build`. Any array or record index yields `T | undefined` and must be bound to a local or asserted before use.
+
 `windowOptions.ts` is its own file rather than a helper inside `index.ts` because `index.ts` imports `electron`, which cannot be loaded in a vitest process. Keeping the logic separate is what makes it testable at all — the same reason `formatsPanel.ts` and `offline.ts` are separate files.
 
 ---
@@ -661,8 +663,11 @@ async function main(): Promise<void> {
   console.log(`\nVendored ${files.length} executables, ${formatBytes(total)} total.`);
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url.startsWith("file:");
-if (isMain && process.argv[1].includes("vendor-binaries-win")) {
+// `noUncheckedIndexedAccess` is on, so process.argv[1] is `string |
+// undefined`. Bind it to a local first: narrowing inside the `const isMain`
+// expression does not carry over to a later `if`.
+const entry = process.argv[1];
+if (entry !== undefined && entry.includes("vendor-binaries-win")) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
