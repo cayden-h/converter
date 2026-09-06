@@ -18,17 +18,10 @@ jobs:
 
       - run: npm ci
 
-      # Keyed on the vendoring script, so the cache invalidates exactly when a
-      # pinned version or digest changes - the same signal the digest check
-      # uses, which keeps the two from drifting apart.
-      - name: Cache vendored tools
-        uses: actions/cache@v4
-        with:
-          path: resources/bin/win32-x64
-          key: win-tools-${{ hashFiles('scripts/vendor-binaries-win.ts') }}
-
-      # Downloads roughly 262 MB on a cache miss. Shells out to 7-Zip, which
-      # is preinstalled on this image.
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
       - name: Vendor the Windows tools
         run: npm run vendor:win
 

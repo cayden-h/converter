@@ -21,12 +21,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Cache vendored tools
-        uses: actions/cache@v4
-        with:
-          path: resources/bin/win32-x64
-          key: win-tools-${{ hashFiles('scripts/vendor-binaries-win.ts') }}
-
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
       - name: Vendor the Windows tools
         run: npm run vendor:win
 
@@ -45,13 +43,22 @@ jobs:
         env:
           EXPECT_PACKAGED_APP: "1"
 
+      # Publish ONLY from a tag. electron-builder derives the release tag from
+      # package.json's version, so --publish always on a manual dispatch would
+      # upload assets into whatever release already carries that version and
+      # overwrite a shipped artifact with a build from an arbitrary commit.
       - name: Build and publish the installers
+        if: startsWith(github.ref, 'refs/tags/v')
         run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # workflow_dispatch runs produce no GitHub Release, so without this the
-      # .exe files from a manual run would be unreachable.
+      - name: Build the installers without publishing
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --win --publish never
+
+      # A manual dispatch deliberately does not publish, so the artifact store
+      # is the only way to reach the .exe files it builds.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
