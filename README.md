@@ -55,6 +55,8 @@ On Windows, download `Converter-<version>-setup.exe`, which installs per-user wi
 
 The Windows build is **unsigned**, so SmartScreen blocks the first launch with "Windows protected your PC". Click **More info**, then **Run anyway**.
 
+Code signing for this project is intended to come from the [SignPath Foundation](https://signpath.org/), which provides free code signing to open-source projects. The application is pending, and the release workflow already signs and verifies the installers, so signing takes effect as soon as the certificate is issued. Signing does not remove the warning immediately: SmartScreen reputation accrues to the certificate over time.
+
 ## Development
 
 ```bash
