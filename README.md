@@ -85,16 +85,6 @@ Because that code is reused, **this project is AGPL-3.0-or-later**.
 
 Poppler, the composite raster tracer, and the Electron PDF writer are ours — upstream has no equivalent.
 
-## Design and plans
-
-The full design spec and all five implementation plans live in [`docs/superpowers/`](docs/superpowers/). They record the reasoning, not just the outcome — including the things that turned out to be wrong.
-
-A few worth reading if you are extending this:
-
-- **`png → svg` needs two tools.** potrace cannot read PNG, so a composite converter rasterises with ImageMagick then traces, owning its intermediate file.
-- **ImageMagick is built from source with `--without-modules`.** Homebrew's build loads every format coder as a separate `.so` from a path compiled in at build time. Those are invisible to `otool -L`, and once relocated the binary could not load them at all — it ran, reported its version correctly, and knew zero formats.
-- **A sandboxed preload must be CommonJS.** With `"type": "module"` the bundler emits `.mjs`, the main process cannot load it, and the app opens to a blank window with every test still green.
-
 ## Known limitations
 
 - Ad-hoc signed only; opening it on someone else's Mac shows a Gatekeeper warning.
