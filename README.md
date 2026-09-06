@@ -71,7 +71,7 @@ src/preload/    A narrow contextBridge surface. Nothing else crosses.
 src/renderer/   Sandboxed React UI. contextIsolation on, nodeIntegration off.
 ```
 
-`tsconfig.web.json` sets `"types": []`, so the renderer program has no `@types/node` at all — a renderer file importing `node:fs` is a compile error, not a runtime crash. There is a test that proves it.
+`tsconfig.web.json` sets `"types": []`, so the renderer program has no `@types/node` at all, so a renderer file importing `node:fs` is a compile error rather than a runtime crash. There is a test that proves it.
 
 The engine picks a converter by scoring each candidate against the **input** format, because ImageMagick and ffmpeg both claim every common still format and a fixed ranking is wrong in either direction: rank ffmpeg above and `png → jpg` degrades; rank it below and `mp4 → gif` routes to a delegate that fails silently.
 
@@ -83,12 +83,12 @@ Seven converter modules are lifted verbatim from [C4illin/ConvertX](https://gith
 
 Because that code is reused, **this project is AGPL-3.0-or-later**.
 
-Poppler, the composite raster tracer, and the Electron PDF writer are ours — upstream has no equivalent.
+Poppler, the composite raster tracer, and the Electron PDF writer are ours, because upstream has no equivalent.
 
 ## Known limitations
 
 - Ad-hoc signed only; opening it on someone else's Mac shows a Gatekeeper warning.
-- Windows is structurally ready — paths are keyed `<platform>-<arch>` and live in one file — but no Windows binaries are vendored yet.
+- Windows is structurally ready (paths are keyed `<platform>-<arch>` and live in one file), but no Windows binaries are vendored yet.
 - Poppler renders page 1 of a PDF; multi-page output is not wired up.
 - `.wmv` has no ffmpeg fallback and `.ts` cannot be converted, both inherited from upstream's format tables.
 - Per-converter options (ffmpeg quality, image resize) and a configurable output folder are not built yet.
