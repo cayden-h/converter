@@ -1,4 +1,4 @@
-import type { ConverterApi } from "../shared/ipc";
+import type { ConverterApi, ProgressUpdate } from "../shared/ipc";
 
 declare global {
   interface Window {
@@ -6,4 +6,5 @@ declare global {
   }
 }
 
+export type { ProgressUpdate };
 export {};

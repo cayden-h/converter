@@ -1,107 +1,183 @@
-import { useEffect, useState } from "react";
-import type { ConvertResult, ToolStatus } from "../shared/ipc";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormatGroup, ProgressUpdate, ToolStatus } from "../shared/ipc";
+import { DropZone } from "./components/DropZone";
+import { FileRow } from "./components/FileRow";
+import { FormatPicker } from "./components/FormatPicker";
+import { FormatsPanel } from "./components/FormatsPanel";
+import { ResultRow, type RowStatus } from "./components/ResultRow";
+import { computeFormatAvailability } from "./formatAvailability";
+import { useFiles } from "./useFiles";
 
-interface Dropped {
-  path: string;
-  name: string;
-  extension: string;
+interface RowState {
+  status: RowStatus;
+  error?: string;
+  outputPath?: string;
 }
 
 export function App() {
   const [tools, setTools] = useState<ToolStatus[]>([]);
-  const [file, setFile] = useState<Dropped | null>(null);
-  const [outputs, setOutputs] = useState<string[]>([]);
+  const { files, add, remove, clear } = useFiles();
+  const [perFileGroups, setPerFileGroups] = useState<FormatGroup[][]>([]);
   const [target, setTarget] = useState("");
-  const [results, setResults] = useState<ConvertResult[]>([]);
+  const [rows, setRows] = useState<Map<string, RowState>>(new Map());
   const [busy, setBusy] = useState(false);
+
+  // Subscribe once for the component's lifetime. Re-subscribing on every
+  // render (or every batch) would stack listeners, so each progress event
+  // would update rows multiple times.
+  useEffect(() => {
+    const unsubscribe = window.converter.onProgress((update: ProgressUpdate) => {
+      if (update.status === "running") {
+        setRows((prev) => new Map(prev).set(update.path, { status: "converting" }));
+      } else if (update.status === "failed") {
+        setRows((prev) =>
+          new Map(prev).set(update.path, { status: "failed", error: update.error }),
+        );
+      }
+      // "done" is left for the final result merge in onConvert, which also
+      // carries the outputPath the engine's progress event does not include.
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     window.converter.detectTools().then(setTools);
   }, []);
 
   useEffect(() => {
-    if (!file) return;
-    window.converter.outputsFor(file.extension).then((list) => {
-      setOutputs(list);
-      setTarget(list[0] ?? "");
-    });
-  }, [file]);
+    if (files.length === 0) {
+      setPerFileGroups([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(files.map((file) => window.converter.groupedOutputsFor(file.extension))).then(
+      (groups) => {
+        if (!cancelled) setPerFileGroups(groups);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
 
-  const onDrop = (event: React.DragEvent) => {
-    event.preventDefault();
-    const dropped = event.dataTransfer.files[0];
-    if (!dropped) return;
-    // Electron 32 removed File.path. Reading it here would silently yield
-    // undefined and drag-and-drop would never work, so go through the preload's
-    // webUtils bridge instead.
-    const path = window.converter.pathForFile(dropped);
-    const extension = dropped.name.split(".").pop() ?? "";
-    setFile({ path, name: dropped.name, extension });
-    setResults([]);
-  };
+  const availability = useMemo(
+    () => computeFormatAvailability(perFileGroups),
+    [perFileGroups],
+  );
+
+  // If the currently selected target stops being reachable by every file
+  // (the file list changed), fall back to the first still-enabled format.
+  useEffect(() => {
+    const current = availability.find((item) => item.format === target);
+    if (current?.enabled) return;
+    setTarget(availability.find((item) => item.enabled)?.format ?? "");
+  }, [availability, target]);
+
+  const openFiles = useCallback(async () => {
+    const paths = await window.converter.openFiles();
+    if (paths.length > 0) add(paths);
+  }, [add]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        openFiles();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openFiles]);
 
   const onConvert = async () => {
-    if (!file || !target) return;
+    if (files.length === 0 || !target) return;
     setBusy(true);
-    setResults(await window.converter.run([{ path: file.path, output: target }]));
+    setRows(new Map(files.map((file) => [file.id, { status: "queued" as RowStatus }])));
+    const results = await window.converter.run(
+      files.map((file) => ({ path: file.path, output: target })),
+    );
+    // The final results are authoritative: they carry the outputPath a "done"
+    // progress event doesn't, and they are the only signal at all for files
+    // that never ran (e.g. cancelled while still queued) - keying by full
+    // input path, never basename, so same-named files from different
+    // directories cannot collide.
+    setRows((prev) => {
+      const next = new Map(prev);
+      for (const result of results) {
+        next.set(result.path, result.ok
+          ? { status: "done", outputPath: result.outputPath }
+          : { status: "failed", error: result.error });
+      }
+      return next;
+    });
     setBusy(false);
   };
 
+  const onCancel = () => {
+    window.converter.cancel();
+  };
+
   return (
-    <main
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
-      style={{ fontFamily: "system-ui", padding: 24 }}
-    >
-      <h1>Converter</h1>
+    <main className="flex h-full flex-col gap-4 p-6">
+      <h1 className="text-lg font-semibold text-ink">Converter</h1>
 
-      <section
-        style={{ border: "2px dashed #999", borderRadius: 12, padding: 32, textAlign: "center" }}
-      >
-        {file ? file.name : "Drop a file here"}
-      </section>
+      <DropZone hasFiles={files.length > 0} onFiles={add} onBrowse={openFiles} />
 
-      {file && (
-        <section style={{ marginTop: 16 }}>
-          <label>
-            Convert to{" "}
-            <select value={target} onChange={(e) => setTarget(e.target.value)}>
-              {outputs.map((format) => (
-                <option key={format} value={format}>
-                  {format}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button onClick={onConvert} disabled={busy || !target} style={{ marginLeft: 12 }}>
-            {busy ? "Converting..." : "Convert"}
-          </button>
+      {files.length > 0 && (
+        <ul className="flex flex-col gap-2 overflow-y-auto">
+          {files.map((file) => {
+            const row = rows.get(file.id);
+            return row ? (
+              <ResultRow
+                key={file.id}
+                name={file.name}
+                extension={file.extension}
+                status={row.status}
+                error={row.error}
+                outputPath={row.outputPath}
+                onReveal={() => window.converter.reveal(row.outputPath!)}
+                onOpen={() => window.converter.openPath(row.outputPath!)}
+              />
+            ) : (
+              <FileRow
+                key={file.id}
+                name={file.name}
+                extension={file.extension}
+                onRemove={() => remove(file.id)}
+              />
+            );
+          })}
+        </ul>
+      )}
+
+      {files.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium text-ink">Convert to</h2>
+          <FormatPicker perFileGroups={perFileGroups} value={target} onChange={setTarget} />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={busy ? onCancel : onConvert}
+              disabled={!busy && !target}
+              className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {busy ? "Cancel" : "Convert"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                setRows(new Map());
+              }}
+              disabled={busy}
+              className="text-sm text-muted hover:text-ink disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
         </section>
       )}
 
-      {results.map((result) => (
-        <p key={result.path}>
-          {result.ok ? (
-            <>
-              Done: {result.outputPath}{" "}
-              <button onClick={() => window.converter.reveal(result.outputPath!)}>Reveal</button>
-            </>
-          ) : (
-            <>Failed: {result.error}</>
-          )}
-        </p>
-      ))}
-
-      <details style={{ marginTop: 32 }}>
-        <summary>Formats</summary>
-        <ul>
-          {tools.map((tool) => (
-            <li key={tool.name}>
-              {tool.name}: {tool.available ? tool.path : "not installed"}
-            </li>
-          ))}
-        </ul>
-      </details>
+      <FormatsPanel tools={tools} />
     </main>
   );
 }

@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, session } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEngine } from "./engine";
 import { enforceOffline } from "./offline";
-import { KNOWN_TOOLS, type ToolName } from "./engine/toolchain";
+import { forwardProgress } from "./progress";
+import { buildToolStatuses } from "./formatsPanel";
 import { IPC, type ConvertRequest } from "../shared/ipc";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,6 +13,8 @@ const bundleDir = app.isPackaged
   : path.join(dirname, "../../resources/bin");
 
 const engine = createEngine(bundleDir);
+
+let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -32,28 +35,48 @@ function createWindow(): void {
   } else {
     window.loadFile(path.join(dirname, "../renderer/index.html"));
   }
+
+  mainWindow = window;
 }
 
 app.whenReady().then(() => {
   enforceOffline(session.defaultSession);
 
-  ipcMain.handle(IPC.detectTools, () =>
-    (Object.keys(KNOWN_TOOLS) as ToolName[]).map((name) => ({
-      name,
-      available: Boolean(engine.toolchain[name]),
-      path: engine.toolchain[name],
-    })),
-  );
+  ipcMain.handle(IPC.detectTools, () => buildToolStatuses(engine.toolchain));
 
   ipcMain.handle(IPC.outputsFor, (_event, extension: string) =>
     engine.registry.outputsFor(extension),
   );
 
+  ipcMain.handle(IPC.groupedOutputsFor, (_event, extension: string) =>
+    engine.registry.groupedOutputsFor(extension),
+  );
+
   ipcMain.handle(IPC.run, (_event, items: ConvertRequest[]) => engine.runner.run(items));
+
+  ipcMain.handle(IPC.cancel, () => {
+    engine.runner.cancel();
+  });
 
   ipcMain.handle(IPC.reveal, (_event, target: string) => {
     shell.showItemInFolder(target);
   });
+
+  ipcMain.handle(IPC.openPath, async (_event, target: string) => {
+    const error = await shell.openPath(target);
+    if (error) throw new Error(error);
+  });
+
+  ipcMain.handle(IPC.openFiles, async () => {
+    if (!mainWindow) return [];
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"],
+    });
+    if (result.canceled) return [];
+    return result.filePaths;
+  });
+
+  forwardProgress(engine.runner, () => mainWindow);
 
   createWindow();
 });

@@ -59,6 +59,10 @@ function outputExtension(output: string): string {
 }
 
 export class JobRunner extends EventEmitter {
+  private cancelled = false;
+  private readonly liveChildren = new Set<ChildProcess>();
+  private readonly cancelSignals = new Set<() => void>();
+
   constructor(
     private readonly registry: Registry,
     /** Public and replaceable so tests can redirect output without reaching into privates. */
@@ -67,7 +71,21 @@ export class JobRunner extends EventEmitter {
     super();
   }
 
+  /**
+   * Stops the batch: queued files never start, and in-flight children are
+   * killed. The flag resets at the start of the next run() so a cancel cannot
+   * poison a later batch.
+   */
+  cancel(): void {
+    this.cancelled = true;
+    for (const child of this.liveChildren) child.kill("SIGKILL");
+    for (const signal of this.cancelSignals) signal();
+  }
+
   async run(items: JobItem[]): Promise<JobResult[]> {
+    this.cancelled = false;
+    this.liveChildren.clear();
+    this.cancelSignals.clear();
     const concurrency = this.options.concurrency ?? DEFAULT_CONCURRENCY;
     const results = new Array<JobResult>(items.length);
     const claimed = new Set<string>();
@@ -75,6 +93,7 @@ export class JobRunner extends EventEmitter {
 
     const worker = async () => {
       while (true) {
+        if (this.cancelled) return;
         const index = cursor++;
         if (index >= items.length) return;
         const item = items[index]!;
@@ -85,6 +104,11 @@ export class JobRunner extends EventEmitter {
     await Promise.all(
       Array.from({ length: Math.min(concurrency, items.length) }, worker),
     );
+
+    for (let i = 0; i < items.length; i++) {
+      results[i] ??= { path: items[i]!.path, ok: false, error: "Cancelled" };
+    }
+
     return results;
   }
 
@@ -141,7 +165,11 @@ export class JobRunner extends EventEmitter {
       const child = baseSpawn(cmd, args, cb, opts) as ChildProcess | undefined;
       if (child) {
         children.add(child);
-        child.on("close", () => children.delete(child));
+        this.liveChildren.add(child);
+        child.on("close", () => {
+          children.delete(child);
+          this.liveChildren.delete(child);
+        });
       }
       return child;
     });
@@ -156,11 +184,29 @@ export class JobRunner extends EventEmitter {
       }, timeoutMs);
     });
 
+    // Promise.race abandons the losing promise but never cancels the work
+    // behind it - the same reason the timeout has to kill children
+    // explicitly. A cancel mid-flight must resolve this race immediately
+    // rather than waiting on the (possibly very long) timeout.
+    let cancelSignal: (() => void) | undefined;
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      cancelSignal = () => reject(new Error("Cancelled"));
+    });
+    this.cancelSignals.add(cancelSignal!);
+    if (this.cancelled) cancelSignal!();
+
     try {
       await Promise.race([
         converter.convert(item.path, inputType, item.output, outputPath, {}, execFile),
         timeout,
+        cancellation,
       ]);
+
+      if (this.cancelled) {
+        const error = "Cancelled";
+        this.emit("progress", { path: item.path, status: "failed", error } as ProgressEvent);
+        return { path: item.path, ok: false, error };
+      }
 
       const exists = this.options.outputExists ?? outputWasWritten;
       if (!exists(outputPath)) {
@@ -177,6 +223,7 @@ export class JobRunner extends EventEmitter {
       return { path: item.path, ok: false, error };
     } finally {
       if (timer) clearTimeout(timer);
+      if (cancelSignal) this.cancelSignals.delete(cancelSignal);
     }
   }
 }

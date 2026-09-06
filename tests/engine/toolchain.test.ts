@@ -4,6 +4,8 @@ import {
   detectToolchain,
   isSupportedPlatform,
   KNOWN_TOOLS,
+  resolveDetectable,
+  DETECTABLE_TOOLS,
 } from "../../src/main/engine/toolchain";
 
 describe("resolveTool", () => {
@@ -173,6 +175,49 @@ describe("multi-binary tool suites", () => {
   test("every suite lists its primary binary first", () => {
     for (const [name, spec] of Object.entries(KNOWN_TOOLS)) {
       expect(spec.binaries[0], `${name} must list a primary binary first`).toBe(spec.binary);
+    }
+  });
+});
+
+describe("detectable-only tools", () => {
+  test("resolves a tool that has no converter wired", () => {
+    // LibreOffice has no converter in this app yet, but the Formats panel
+    // still reports whether it is installed. That path knowledge belongs here,
+    // not in the panel - toolchain.ts is the single home for platform paths.
+    const result = resolveDetectable("libreoffice", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/nonexistent",
+      exists: (p) => p === "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    });
+    expect(result).toBe("/Applications/LibreOffice.app/Contents/MacOS/soffice");
+  });
+
+  test("finds a homebrew-linked binary too", () => {
+    const result = resolveDetectable("libreoffice", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/nonexistent",
+      exists: (p) => p === "/opt/homebrew/bin/soffice",
+    });
+    expect(result).toBe("/opt/homebrew/bin/soffice");
+  });
+
+  test("returns null when absent", () => {
+    const result = resolveDetectable("vtracer", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/nonexistent",
+      exists: () => false,
+    });
+    expect(result).toBeNull();
+  });
+
+  test("detectable tools are kept out of KNOWN_TOOLS", () => {
+    // Adding them there would make the registry advertise converters that do
+    // not exist. They are detected for reporting only.
+    for (const name of Object.keys(DETECTABLE_TOOLS)) {
+      expect(Object.keys(KNOWN_TOOLS)).not.toContain(name);
     }
   });
 });
