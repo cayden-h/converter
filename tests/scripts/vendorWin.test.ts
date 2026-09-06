@@ -76,8 +76,12 @@ describe("assertDigest", () => {
 describe("SOURCES", () => {
   test("covers exactly the ten executables toolchain.ts resolves", () => {
     // KNOWN_TOOLS lists eight tools, but poppler is a suite of three
-    // executables, so the bundle must contain ten files.
-    const produced = SOURCES.flatMap((source) => Object.values(source.members)).sort();
+    // executables, so the bundle must contain ten. Non-executable members
+    // (ImageMagick's configuration) are filtered out here and asserted
+    // separately below.
+    const produced = SOURCES.flatMap((source) => Object.values(source.members))
+      .filter((destination) => destination.endsWith(".exe"))
+      .sort();
     expect(produced).toEqual(
       [
         "dasel.exe",
@@ -92,6 +96,19 @@ describe("SOURCES", () => {
         "resvg.exe",
       ].sort(),
     );
+  });
+
+  test("imagemagick carries its configuration, not just the binary", () => {
+    // The portable archive is flat: magick.exe sits beside the XML that
+    // ImageMagick reads from its own directory. An earlier version of this
+    // table took only the .exe, which would have shipped a magick with no
+    // delegate definitions, no font list and no MIME table.
+    const imagemagick = SOURCES.find((source) => source.name === "imagemagick");
+    const members = Object.values(imagemagick?.members ?? {});
+    expect(members).toContain("delegates.xml");
+    expect(members).toContain("type.xml");
+    expect(members).toContain("policy.xml");
+    expect(members).toContain("mime.xml");
   });
 
   test("every source is pinned to a concrete digest", () => {

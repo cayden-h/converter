@@ -274,8 +274,12 @@ describe("assertDigest", () => {
 describe("SOURCES", () => {
   test("covers exactly the ten executables toolchain.ts resolves", () => {
     // KNOWN_TOOLS lists eight tools, but poppler is a suite of three
-    // executables, so the bundle must contain ten files.
-    const produced = SOURCES.flatMap((source) => Object.values(source.members)).sort();
+    // executables, so the bundle must contain ten. Non-executable members
+    // (ImageMagick's configuration) are filtered out here and asserted
+    // separately below.
+    const produced = SOURCES.flatMap((source) => Object.values(source.members))
+      .filter((destination) => destination.endsWith(".exe"))
+      .sort();
     expect(produced).toEqual(
       [
         "dasel.exe",
@@ -290,6 +294,19 @@ describe("SOURCES", () => {
         "resvg.exe",
       ].sort(),
     );
+  });
+
+  test("imagemagick carries its configuration, not just the binary", () => {
+    // The portable archive is flat: magick.exe sits beside the XML that
+    // ImageMagick reads from its own directory. An earlier version of this
+    // table took only the .exe, which would have shipped a magick with no
+    // delegate definitions, no font list and no MIME table.
+    const imagemagick = SOURCES.find((source) => source.name === "imagemagick");
+    const members = Object.values(imagemagick?.members ?? {});
+    expect(members).toContain("delegates.xml");
+    expect(members).toContain("type.xml");
+    expect(members).toContain("policy.xml");
+    expect(members).toContain("mime.xml");
   });
 
   test("every source is pinned to a concrete digest", () => {
@@ -379,13 +396,41 @@ export const SOURCES: WindowsSource[] = [
   {
     name: "imagemagick",
     // The portable build is statically linked, so unlike the Homebrew build
-    // there are no dlopen'd coder modules to locate and relocate, and the
-    // configuration XML ships inside this same archive. Distributed as .7z,
-    // which is why main() needs 7-Zip.
+    // there are no dlopen'd coder modules to locate and relocate - format
+    // support is compiled in. Distributed as .7z, which is why main() needs
+    // 7-Zip.
+    //
+    // The archive is FLAT: magick.exe sits at the root beside its
+    // configuration XML, and ImageMagick reads that configuration from its
+    // own directory. Taking only the .exe would ship a magick with no
+    // delegate definitions, no font list and no MIME table, so the
+    // configuration is listed here and lands in bin/ beside the binary.
+    //
+    // Enumerated rather than globbed so a file disappearing upstream fails
+    // the build through missingMembers(). The trade is that a config file
+    // ADDED upstream has to be added here by hand.
+    //
+    // The archive also carries compare/composite/conjure/identify/mogrify/
+    // montage/stream, each a byte-identical 31MB copy of magick.exe. Taking
+    // only magick.exe saves roughly 220MB.
     url: "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-31/ImageMagick-7.1.2-31-portable-Q16-HDRI-x64.7z",
     sha256: "",
     archive: "7z",
-    members: { "magick.exe": "magick.exe" },
+    members: {
+      "magick.exe": "magick.exe",
+      "colors.xml": "colors.xml",
+      "configure.xml": "configure.xml",
+      "delegates.xml": "delegates.xml",
+      "english.xml": "english.xml",
+      "locale.xml": "locale.xml",
+      "log.xml": "log.xml",
+      "mime.xml": "mime.xml",
+      "policy.xml": "policy.xml",
+      "thresholds.xml": "thresholds.xml",
+      "type.xml": "type.xml",
+      "type-ghostscript.xml": "type-ghostscript.xml",
+      "sRGB.icc": "sRGB.icc",
+    },
   },
   {
     name: "pandoc",

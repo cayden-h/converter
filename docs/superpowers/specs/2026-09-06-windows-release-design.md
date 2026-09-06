@@ -87,8 +87,9 @@ ImageMagick ships `.7z`, which Node cannot read and which the other six do not n
 GitHub's `windows-latest` runner has 7-Zip preinstalled, so the script shells out to `7z x` for that one archive and uses a zip path for the rest.
 The script is therefore expected to run on Windows, and says so if invoked elsewhere.
 
-The two ImageMagick complications that the macOS build hit do not recur here.
-The Windows portable build is static, so there are no dlopen'd coder modules to locate and relocate, and its configuration XML ships inside the same archive.
+Only one of the two ImageMagick complications that the macOS build hit recurs here.
+The Windows portable build is static, so there are no dlopen'd coder modules to locate and relocate.
+Its configuration XML does still matter: the archive is flat, `magick.exe` reads its configuration from its own directory, and the vendoring script must therefore copy that XML into `bin/` beside the binary rather than taking the executable alone.
 
 ### Output layout
 
