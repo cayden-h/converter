@@ -2,7 +2,7 @@
 
 **Goal:** Ship a double-clickable Windows `.exe` that converts files on a PC with nothing else installed, matching what the macOS build already does.
 
-**Status:** Design approved 2026-09-06. Not yet implemented.
+**Status:** Design approved 2026-09-06. Implemented on branch feat/windows-release.
 
 ---
 
@@ -56,7 +56,7 @@ Every version is pinned in one `SOURCES` table at the top of the script.
 
 | Tool | Source | Archive | Pin |
 |---|---|---|---|
-| ffmpeg, ffprobe | BtbN/FFmpeg-Builds | `ffmpeg-n9.0-latest-win64-gpl.zip` | static GPL build |
+| ffmpeg, ffprobe | BtbN/FFmpeg-Builds | `ffmpeg-n9.0-latest-win64-gpl-9.0.zip` | static GPL build |
 | magick | ImageMagick/ImageMagick | `ImageMagick-<v>-portable-Q16-HDRI-x64.7z` | 7.1.2-31 |
 | pandoc | jgm/pandoc | `pandoc-<v>-windows-x86_64.zip` | 3.11 |
 | pdftoppm, pdftotext, pdfimages | oschwartz10612/poppler-windows | `Release-<v>.zip` | v26.07.0-0 |
@@ -83,8 +83,8 @@ A mismatch fails the build with the expected and actual digests, and the fix is 
 
 ### Extraction
 
-ImageMagick ships `.7z`, which Node cannot read and which the other six do not need.
-GitHub's `windows-latest` runner has 7-Zip preinstalled, so the script shells out to `7z x` for that one archive and uses a zip path for the rest.
+ImageMagick ships `.7z`, which Node cannot read.
+GitHub's `windows-latest` runner has 7-Zip preinstalled, so the script shells out to 7-Zip for BOTH zip and 7z archives, which keeps the two formats on one extraction code path rather than splitting them across a zip library and a subprocess.
 The script is therefore expected to run on Windows, and says so if invoked elsewhere.
 
 Only one of the two ImageMagick complications that the macOS build hit recurs here.
@@ -106,7 +106,7 @@ No change to `toolchain.ts`.
 ### Testing the script
 
 Same split as the mac script.
-Pure logic is exported and unit-tested in `tests/scripts/vendor-win.test.ts` with no filesystem or network: asset-name selection from a release manifest, the archive-member to destination mapping, and digest comparison including the mismatch failure.
+Pure logic is exported and unit-tested in `tests/scripts/vendorWin.test.ts` with no filesystem or network: mapping an archive member to its destination by basename, missing-member detection, and digest comparison including the mismatch failure. There is no asset-name selection to test - the download URLs are hardcoded in `SOURCES`.
 Download and extraction stay inside `main()` and are covered by CI actually running it.
 
 ## 3. Packaging
@@ -136,15 +136,15 @@ Buying a certificate is out of scope, as notarization was for macOS.
 
 Two workflows under `.github/workflows/`, both on `windows-latest`.
 
-**`ci.yml`** - on pull request and on push to master.
+**`ci.yml`** - on pull request and on push to `main`.
 Runs `npm ci`, `npm run vendor:win`, `npm run build`, `npm test`, then `electron-builder --win --dir` and the packaged integration test.
 This is what catches Windows breakage without cutting a tag.
 
 **`release.yml`** - on `v*` tag push and on `workflow_dispatch`.
-Same steps, then a full `electron-builder --win --publish always`, which creates the GitHub Release and attaches both `.exe` files.
+Same steps, then a full `electron-builder --win` build. Publishing is gated on the ref being a `v*` tag: a tag run publishes, creating the GitHub Release and attaching both `.exe` files, while a manual dispatch builds with `--publish never` and uploads the `.exe` files as workflow artifacts instead. Without that gate a dispatch would push assets into whatever release already carries `package.json`'s version.
 
-Downloaded archives are cached keyed on the SHA-256 values in `SOURCES`, so a run that changes no pins does not re-download roughly 500 MB.
-The cache key changing is the same signal as the digest changing, which keeps the two from drifting apart.
+Each run downloads roughly 262 MB during vendoring.
+An output cache was tried and removed: the script re-downloads and re-verifies every archive regardless of what is restored, so the cache only added restore and upload time.
 
 `package.json` gains `vendor:win` alongside the existing `vendor` script, and a `dist:win` script for the electron-builder invocation.
 
@@ -163,11 +163,11 @@ Both assertions carry over unchanged in intent:
 The existing note is explicit that the mac test runs on a machine that has Homebrew, so a pass does not prove the app works without it, and that no clean Mac was available to check.
 
 On Windows that caveat mostly lifts.
-A GitHub `windows-latest` runner is a fresh machine that never had ImageMagick, ffmpeg, poppler, resvg, dasel or potrace installed by hand.
+A GitHub `windows-latest` runner is a machine that never had pandoc, ffmpeg, poppler, resvg, dasel or potrace installed by hand.
 A pass there is real evidence of self-containment.
 
 Two honest limits remain and belong in the note.
-Pandoc is preinstalled on GitHub's Windows runners, so for that one tool the assertion that the resolved path lives inside the bundle is doing all the work and the "clean machine" argument does not apply.
+ImageMagick IS preinstalled on GitHub's Windows runners (7.1.2-25 on windows-2025, per the actions/runner-images manifest), so for that one tool the assertion that the resolved path lives inside the bundle is doing all the work and the "clean machine" argument does not apply. Pandoc is NOT preinstalled.
 And no automated test on any platform checks what the window looks like, so the chrome change in section 1 is verified by a human or not at all.
 
 ## 6. Verification before release

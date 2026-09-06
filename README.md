@@ -58,7 +58,7 @@ The Windows build is **unsigned**, so SmartScreen blocks the first launch with "
 ## Development
 
 ```bash
-npm test          # 239 tests
+npm test          # 273 tests
 npm run build     # typecheck both layers, then bundle
 ```
 

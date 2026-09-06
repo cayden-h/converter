@@ -761,7 +761,7 @@ if (isMain) {
 
 Run: `npm run digests:win`
 
-Expected: seven lines, each a 64-character hex digest, a tool name, and a size. This downloads roughly 500 MB and takes several minutes.
+Expected: seven lines, each a 64-character hex digest, a tool name, and a size. This downloads roughly 262 MB and takes several minutes.
 
 Copy each digest into the matching `sha256` field in `SOURCES`. Match by the printed name - the order of output is the order of the array.
 
@@ -872,6 +872,18 @@ const BUNDLE_BIN =
     : path.join(APP_PATH, "Contents", "Resources", "bin");
 
 const appExists = existsSync(APP_PATH);
+
+// The workflows run this file a second time, explicitly, after packaging.
+// Without this the whole suite would skipIf itself away when the build
+// landed somewhere unexpected, and vitest would exit 0 - a green tick on a
+// release whose bundle was never opened. `npm test` runs this file BEFORE
+// packaging and skips it honestly, which is why this keys off an explicit
+// variable rather than CI.
+if (process.env.EXPECT_PACKAGED_APP === "1") {
+  test("the packaged app was actually built", () => {
+    expect(appExists, `expected a packaged app at ${APP_PATH}`).toBe(true);
+  });
+}
 ```
 
 - [ ] **Step 2: Update the build comment above the describe**
@@ -900,16 +912,43 @@ The file opens with a block comment headed `HONESTY NOTE`. Append these paragrap
 ```
  * On WINDOWS the main caveat above mostly lifts, and the note is stronger
  * rather than weaker. This suite runs on a GitHub `windows-latest` runner,
- * a fresh machine where ImageMagick, ffmpeg, poppler, resvg, dasel and
- * potrace were never installed. A pass there is real evidence that the
- * bundle is self-contained.
+ * a machine where ffmpeg, pandoc, poppler, resvg, dasel and potrace were
+ * never installed. A pass there is real evidence that the bundle is
+ * self-contained.
  *
- * Two honest limits remain. Pandoc IS preinstalled on GitHub's Windows
- * runners, so for that one tool the "clean machine" argument does not apply
- * and the in-bundle path assertion below is doing all the work. And no
- * automated test on any platform checks what the WINDOW looks like - the
- * macOS-only chrome guard in src/main/windowOptions.ts is verified by a
+ * Two honest limits remain. ImageMagick IS preinstalled on that image
+ * (7.1.2-25 on windows-2025, checked against the runner-images manifest),
+ * so for that one tool the "clean machine" argument does not apply and the
+ * in-bundle path assertion below is doing all the work - without it, a
+ * missing bundled magick.exe would quietly resolve to the runner's copy and
+ * every conversion would still pass. Pandoc, ffmpeg, poppler, resvg, dasel
+ * and potrace are genuinely absent from the image.
+ *
+ * And no automated test on any platform checks what the WINDOW looks like -
+ * the macOS-only chrome guard in src/main/windowOptions.ts is verified by a
  * human on a real desktop or not at all.
+```
+
+- [ ] **Step 3b: Assert the EXACT resolved tool set**
+
+The in-bundle test asserted only `expect(resolved.length).toBeGreaterThan(0)`, which
+a partial bundle satisfies while every conversion block below skips itself away.
+Add `KNOWN_TOOLS` to the imports and replace that line:
+
+```ts
+import { KNOWN_TOOLS } from "../../src/main/engine/toolchain";
+```
+
+```ts
+    const resolved = Object.entries(engine.toolchain);
+    // The whole point of this task: a tool resolving to /opt/homebrew here
+    // would mean the packaged app depends on Homebrew being installed on the
+    // machine that runs it, which the bundling work is supposed to prevent.
+    // Assert the EXACT set, not merely that something resolved. A bundle
+    // missing three of its ten executables still yields a non-empty
+    // toolchain, every conversion block below skipIf's itself away, and this
+    // test goes green while the shipped installer cannot convert video.
+    expect(Object.keys(engine.toolchain).sort()).toEqual(Object.keys(KNOWN_TOOLS).sort());
 ```
 
 - [ ] **Step 4: Verify the macOS behaviour is unchanged**
@@ -958,15 +997,10 @@ jobs:
 
       - run: npm ci
 
-      # Keyed on the vendoring script, so the cache invalidates exactly when a
-      # pinned version or digest changes - the same signal the digest check
-      # uses, which keeps the two from drifting apart.
-      - name: Cache vendored tools
-        uses: actions/cache@v4
-        with:
-          path: resources/bin/win32-x64
-          key: win-tools-${{ hashFiles('scripts/vendor-binaries-win.ts') }}
-
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
       - name: Vendor the Windows tools
         run: npm run vendor:win
 
@@ -974,8 +1008,12 @@ jobs:
 
       - run: npm test
 
+      # --x64 is required. Without it electron-builder targets the host arch
+      # and writes release/win-arm64-unpacked, which the packaged test does
+      # not look for - it would skip instead of fail, and the skip reads as
+      # a pass.
       - name: Package (unpacked)
-        run: npx electron-builder --win --dir
+        run: npx electron-builder --win --dir --x64
 
       # Runs only now that release/win-unpacked exists. This is the step that
       # proves the bundle is self-contained: every resolved tool path must be
@@ -983,6 +1021,8 @@ jobs:
       # verified by magic bytes.
       - name: Packaged app test
         run: npx vitest run tests/integration/packaged.test.ts
+        env:
+          EXPECT_PACKAGED_APP: "1"
 ```
 
 - [ ] **Step 2: Write the release workflow**
@@ -1013,12 +1053,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Cache vendored tools
-        uses: actions/cache@v4
-        with:
-          path: resources/bin/win32-x64
-          key: win-tools-${{ hashFiles('scripts/vendor-binaries-win.ts') }}
-
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
       - name: Vendor the Windows tools
         run: npm run vendor:win
 
@@ -1026,22 +1064,33 @@ jobs:
 
       - run: npm test
 
-      # Package unpacked first so the packaged test can run BEFORE anything is
-      # published. Publishing an installer whose bundled tools were never
-      # exercised is the failure this ordering prevents.
+      # Package unpacked and test it BEFORE anything is published. Publishing
+      # an installer whose bundled tools were never exercised is the failure
+      # this ordering prevents.
       - name: Package (unpacked)
-        run: npx electron-builder --win --dir
+        run: npx electron-builder --win --dir --x64
 
       - name: Packaged app test
         run: npx vitest run tests/integration/packaged.test.ts
+        env:
+          EXPECT_PACKAGED_APP: "1"
 
+      # Publish ONLY from a tag. electron-builder derives the release tag from
+      # package.json's version, so --publish always on a manual dispatch would
+      # upload assets into whatever release already carries that version and
+      # overwrite a shipped artifact with a build from an arbitrary commit.
       - name: Build and publish the installers
+        if: startsWith(github.ref, 'refs/tags/v')
         run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # workflow_dispatch runs produce no GitHub Release, so without this the
-      # .exe files from a manual run would be unreachable.
+      - name: Build the installers without publishing
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --win --publish never
+
+      # A manual dispatch deliberately does not publish, so the artifact store
+      # is the only way to reach the .exe files it builds.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -1066,7 +1115,7 @@ npx -y gh-axi run list --branch feat/windows-release
 npx -y gh-axi run watch
 ```
 
-Expected: the `windows` job passes every step. The first run has no cache and downloads roughly 500 MB during vendoring, so allow 15-20 minutes.
+Expected: the `windows` job passes every step. Every run downloads roughly 262 MB during vendoring, so allow 15-20 minutes.
 
 If `npm run vendor:win` fails with a SHA-256 mismatch, one of the three mutable upstream URLs changed between Task 3 and now. Re-run `npm run digests:win` locally, review what changed, update `SOURCES`, and commit.
 
