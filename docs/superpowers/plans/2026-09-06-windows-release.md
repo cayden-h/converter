@@ -30,9 +30,9 @@
 | `.github/workflows/release.yml` | **Create.** Publish on `v*` tag and `workflow_dispatch`. |
 | `README.md` | **Modify.** Windows install section and the SmartScreen note. |
 
-**Strictness note, true of every code block in this plan:** `tsconfig.node.json` sets `strict` and `noUncheckedIndexedAccess`, and its `include` covers `tests/**/*`, which imports `scripts/*.ts` — so both new script files are type-checked by `npm run build`. Any array or record index yields `T | undefined` and must be bound to a local or asserted before use.
+**Strictness note, true of every code block in this plan:** `tsconfig.node.json` sets `strict` and `noUncheckedIndexedAccess`, and its `include` covers `tests/**/*`, which imports `scripts/*.ts` - so both new script files are type-checked by `npm run build`. Any array or record index yields `T | undefined` and must be bound to a local or asserted before use.
 
-`windowOptions.ts` is its own file rather than a helper inside `index.ts` because `index.ts` imports `electron`, which cannot be loaded in a vitest process. Keeping the logic separate is what makes it testable at all — the same reason `formatsPanel.ts` and `offline.ts` are separate files.
+`windowOptions.ts` is its own file rather than a helper inside `index.ts` because `index.ts` imports `electron`, which cannot be loaded in a vitest process. Keeping the logic separate is what makes it testable at all - the same reason `formatsPanel.ts` and `offline.ts` are separate files.
 
 ---
 
@@ -97,7 +97,7 @@ describe("chromeOptionsFor", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/main/windowOptions.test.ts`
-Expected: FAIL — `Failed to resolve import "../../src/main/windowOptions"`.
+Expected: FAIL - `Failed to resolve import "../../src/main/windowOptions"`.
 
 - [ ] **Step 3: Implement**
 
@@ -172,7 +172,7 @@ Expected: build succeeds, all tests pass.
 
 Run: `npm run dev`
 
-Expected: the window looks exactly as before — inset traffic lights, translucent sidebar. This step exists because the guard is a refactor that must be a no-op on macOS; a regression here would be invisible to the test suite. Close the window when satisfied.
+Expected: the window looks exactly as before - inset traffic lights, translucent sidebar. This step exists because the guard is a refactor that must be a no-op on macOS; a regression here would be invisible to the test suite. Close the window when satisfied.
 
 - [ ] **Step 8: Commit**
 
@@ -183,7 +183,7 @@ git commit -m "fix: keep macOS-only window chrome off Windows"
 
 ---
 
-### Task 2: The Windows vendoring script — pure logic
+### Task 2: The Windows vendoring script - pure logic
 
 The script is split the same way `scripts/vendor-binaries.ts` is: logic that can be tested without a network or a filesystem is exported, and the downloading lives in `main()`.
 
@@ -340,7 +340,7 @@ describe("SOURCES", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/scripts/vendorWin.test.ts`
-Expected: FAIL — `Failed to resolve import "../../scripts/vendor-binaries-win"`.
+Expected: FAIL - `Failed to resolve import "../../scripts/vendor-binaries-win"`.
 
 - [ ] **Step 3: Implement the table and the pure helpers**
 
@@ -540,7 +540,7 @@ export function assertDigest(expected: string, actual: string, name: string): vo
 
 Run: `npx vitest run tests/scripts/vendorWin.test.ts`
 
-Expected: every test passes EXCEPT `every source is pinned to a concrete digest`, which fails because all seven `sha256` fields are still `""`. That is correct — Task 3 fills them in. Do not delete or skip the test to get green.
+Expected: every test passes EXCEPT `every source is pinned to a concrete digest`, which fails because all seven `sha256` fields are still `""`. That is correct - Task 3 fills them in. Do not delete or skip the test to get green.
 
 - [ ] **Step 5: Commit**
 
@@ -551,7 +551,7 @@ git commit -m "feat: pin the Windows tool sources"
 
 ---
 
-### Task 3: The Windows vendoring script — download and extract
+### Task 3: The Windows vendoring script - download and extract
 
 **Files:**
 - Modify: `scripts/vendor-binaries-win.ts` (append)
@@ -763,7 +763,7 @@ Run: `npm run digests:win`
 
 Expected: seven lines, each a 64-character hex digest, a tool name, and a size. This downloads roughly 500 MB and takes several minutes.
 
-Copy each digest into the matching `sha256` field in `SOURCES`. Match by the printed name — the order of output is the order of the array.
+Copy each digest into the matching `sha256` field in `SOURCES`. Match by the printed name - the order of output is the order of the array.
 
 - [ ] **Step 4: Verify the digest test now passes**
 
@@ -825,7 +825,7 @@ Windows arm64 is deliberately absent: resvg publishes no arm64 Windows asset and
 
 Run: `npx electron-builder --win --dir --config electron-builder.yml 2>&1 | head -20`
 
-Expected: electron-builder starts and reports `packaging platform=win32 arch=x64`. It may then fail while downloading the Windows Electron binary or because `resources/bin/win32-x64` is absent — either is fine here. A YAML parse error is not: fix the indentation if you see one.
+Expected: electron-builder starts and reports `packaging platform=win32 arch=x64`. It may then fail while downloading the Windows Electron binary or because `resources/bin/win32-x64` is absent - either is fine here. A YAML parse error is not: fix the indentation if you see one.
 
 - [ ] **Step 3: Commit**
 
@@ -916,7 +916,7 @@ The file opens with a block comment headed `HONESTY NOTE`. Append these paragrap
 
 Run: `npx vitest run tests/integration/packaged.test.ts`
 
-Expected: identical to before the change. If `release/mac-arm64/Converter.app` is present from an earlier build, the tests run and pass; if not, they skip. Either is correct — what must NOT happen is a change in which of the two you see.
+Expected: identical to before the change. If `release/mac-arm64/Converter.app` is present from an earlier build, the tests run and pass; if not, they skip. Either is correct - what must NOT happen is a change in which of the two you see.
 
 - [ ] **Step 5: Commit**
 
@@ -1070,7 +1070,7 @@ Expected: the `windows` job passes every step. The first run has no cache and do
 
 If `npm run vendor:win` fails with a SHA-256 mismatch, one of the three mutable upstream URLs changed between Task 3 and now. Re-run `npm run digests:win` locally, review what changed, update `SOURCES`, and commit.
 
-If the packaged test fails with a tool resolving outside the bundle, the `members` map for that source is wrong — read the step's log for which tool, and check the archive's actual layout.
+If the packaged test fails with a tool resolving outside the bundle, the `members` map for that source is wrong - read the step's log for which tool, and check the archive's actual layout.
 
 ---
 
@@ -1093,7 +1093,7 @@ Alongside the existing macOS instructions, add a Windows section covering:
 
 - The two artifacts and the difference between them: `Converter-<version>-setup.exe` installs per-user with a Start Menu entry and an uninstaller; `Converter-<version>-portable.exe` runs from anywhere with no install.
 - Windows 10 or 11, x64. No arm64 build, because two of the bundled tools publish no arm64 Windows binary.
-- The SmartScreen warning: the build is unsigned, so the first run shows "Windows protected your PC" and the user must click **More info** then **Run anyway**. Word this the way the existing Gatekeeper note is worded — state it plainly, do not apologise for it.
+- The SmartScreen warning: the build is unsigned, so the first run shows "Windows protected your PC" and the user must click **More info** then **Run anyway**. Word this the way the existing Gatekeeper note is worded - state it plainly, do not apologise for it.
 - Nothing else needs installing. The tools ship inside the app.
 
 - [ ] **Step 3: Commit**
@@ -1133,7 +1133,7 @@ Drag a PNG onto the drop zone, convert it to JPG, and open the result. Then open
 
 - [ ] **Step 4: Record the outcome**
 
-If anything is wrong, note exactly what and fix it before tagging a release. If everything is right, say so in the PR — this manual pass is the only evidence that exists for the window chrome, so it belongs in the record.
+If anything is wrong, note exactly what and fix it before tagging a release. If everything is right, say so in the PR - this manual pass is the only evidence that exists for the window chrome, so it belongs in the record.
 
 ---
 
