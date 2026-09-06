@@ -18,6 +18,21 @@ export function ensurePngFixture(magickPath: string): string {
   return target;
 }
 
+/**
+ * Same fixture as `ensurePngFixture`, but under a distinct filename so a
+ * caller that must generate it with a SPECIFIC magick binary (e.g. the one
+ * bundled inside the packaged app) never silently reuses a copy some other
+ * test already generated with a different one (e.g. Homebrew's).
+ */
+export function ensurePngFixtureWith(magickPath: string, filename: string): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, filename);
+  if (!existsSync(target)) {
+    execFileSync(magickPath, ["-size", "64x64", "xc:red", target]);
+  }
+  return target;
+}
+
 /** A 1-second video WITH an audio track, generated with ffmpeg itself. */
 export function ensureVideoFixture(ffmpegPath: string): string {
   mkdirSync(dir, { recursive: true });

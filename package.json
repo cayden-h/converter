@@ -10,7 +10,8 @@
     "build": "tsc -b tsconfig.node.json tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "vendor": "npx tsx scripts/vendor-binaries.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -19,6 +20,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.20",
     "electron": "^33.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

@@ -151,6 +151,7 @@ export function createEngine(bundleDir: string): Engine {
     bundleDir,
   });
 
+
   const registry = buildRegistry(CONVERTERS, toolchain);
 
   // Rekeys tool names to binary names. See toCommandMap's doc comment for why
