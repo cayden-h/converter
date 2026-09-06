@@ -5,7 +5,7 @@
 <h1 align="center">Converter</h1>
 
 <p align="center">
-  A local file converter for macOS. Nothing you convert ever leaves your machine.
+  A local file converter for macOS and Windows. Nothing you convert ever leaves your machine.
 </p>
 
 ---
@@ -51,6 +51,10 @@ The app is **ad-hoc signed**, not notarized, so macOS will block the first launc
 xattr -dr com.apple.quarantine release/mac-arm64/Converter.app
 ```
 
+On Windows, download `Converter-<version>-setup.exe`, which installs per-user with a Start Menu entry and an uninstaller, or `Converter-<version>-portable.exe`, which runs from anywhere with no install. Windows 10 or 11, x64 only: resvg publishes no arm64 Windows binary and ImageMagick's portable build is x64/x86 only, so an arm64 installer would silently lose SVG and image conversion. As on macOS, the conversion tools ship inside the app and there is nothing else to install.
+
+The Windows build is **unsigned**, so SmartScreen blocks the first launch with "Windows protected your PC". Click **More info**, then **Run anyway**.
+
 ## Development
 
 ```bash
@@ -88,7 +92,8 @@ Poppler, the composite raster tracer, and the Electron PDF writer are ours, beca
 ## Known limitations
 
 - Ad-hoc signed only; opening it on someone else's Mac shows a Gatekeeper warning.
-- Windows is structurally ready (paths are keyed `<platform>-<arch>` and live in one file), but no Windows binaries are vendored yet.
+- Unsigned on Windows; the first launch shows a SmartScreen warning.
+- No arm64 Windows build, because resvg and ImageMagick publish no arm64 Windows binaries.
 - Poppler renders page 1 of a PDF; multi-page output is not wired up.
 - `.wmv` has no ffmpeg fallback and `.ts` cannot be converted, both inherited from upstream's format tables.
 - Per-converter options (ffmpeg quality, image resize) and a configurable output folder are not built yet.
