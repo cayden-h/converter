@@ -49,3 +49,5 @@ jobs:
       # verified by magic bytes.
       - name: Packaged app test
         run: npx vitest run tests/integration/packaged.test.ts
+        env:
+          EXPECT_PACKAGED_APP: "1"

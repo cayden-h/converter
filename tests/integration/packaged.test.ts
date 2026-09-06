@@ -61,6 +61,18 @@ const BUNDLE_BIN =
 
 const appExists = existsSync(APP_PATH);
 
+// The workflows run this file a second time, explicitly, after packaging.
+// Without this the whole suite would skipIf itself away when the build
+// landed somewhere unexpected, and vitest would exit 0 - a green tick on a
+// release whose bundle was never opened. `npm test` runs this file BEFORE
+// packaging and skips it honestly, which is why this keys off an explicit
+// variable rather than CI.
+if (process.env.EXPECT_PACKAGED_APP === "1") {
+  test("the packaged app was actually built", () => {
+    expect(appExists, `expected a packaged app at ${APP_PATH}`).toBe(true);
+  });
+}
+
 // The app must be built first: `npx electron-builder --mac --dir` on macOS,
 // `npx electron-builder --win --dir` on Windows. That build takes minutes, so
 // it is not run as part of this test - if it is missing, skip honestly rather
