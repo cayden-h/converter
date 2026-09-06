@@ -1,0 +1,17 @@
+import type { ChildProcess, ExecFileOptions } from "node:child_process";
+
+export type ExecFileFn = (
+  cmd: string,
+  args: string[],
+  callback: (err: Error | null, stdout: string, stderr: string) => void,
+  options?: ExecFileOptions,
+) => ChildProcess | void;
+
+export type ConvertFnWithExecFile = (
+  filePath: string,
+  fileType: string,
+  convertTo: string,
+  targetPath: string,
+  options: unknown,
+  execFileOverride?: ExecFileFn,
+) => Promise<string>;

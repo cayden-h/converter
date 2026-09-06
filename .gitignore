@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+resources/bin/
+*.tsbuildinfo
+
+# Generated test fixtures (created on demand by tests/fixtures/make-fixtures.ts)
+tests/fixtures/sample.*

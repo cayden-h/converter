@@ -213,7 +213,12 @@ Resolves a logical tool name to an absolute executable path. This is the ONLY fi
 
 ```ts
 import { describe, expect, test } from "vitest";
-import { resolveTool, KNOWN_TOOLS } from "../../src/main/engine/toolchain";
+import {
+  resolveTool,
+  detectToolchain,
+  isSupportedPlatform,
+  KNOWN_TOOLS,
+} from "../../src/main/engine/toolchain";
 
 describe("resolveTool", () => {
   test("returns the bundled path when the bundled binary exists", () => {
@@ -248,7 +253,10 @@ describe("resolveTool", () => {
     expect(result).toBeNull();
   });
 
-  test("appends .exe on win32", () => {
+  test("builds the win32 bundled path with backslashes and an .exe suffix", () => {
+    // Asserts the FULL path, not just a substring. A `toContain("magick.exe")`
+    // check here would pass even if the separators were wrong, which is the
+    // exact bug this test exists to catch when running on a non-Windows host.
     const seen: string[] = [];
     resolveTool("imagemagick", {
       platform: "win32",
@@ -259,7 +267,21 @@ describe("resolveTool", () => {
         return false;
       },
     });
-    expect(seen[0]).toContain("magick.exe");
+    expect(seen[0]).toBe("C:\\app\\bin\\win32-x64\\magick.exe");
+  });
+
+  test("builds the darwin bundled path with forward slashes and no suffix", () => {
+    const seen: string[] = [];
+    resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => {
+        seen.push(p);
+        return false;
+      },
+    });
+    expect(seen[0]).toBe("/bundle/bin/darwin-arm64/magick");
   });
 
   test("prefers the bundled binary over a system one", () => {
@@ -276,6 +298,54 @@ describe("resolveTool", () => {
     for (const [name, spec] of Object.entries(KNOWN_TOOLS)) {
       expect(spec.binary, `${name} must declare a binary`).toBeTruthy();
     }
+  });
+
+  test("tries the second system path when the first is absent", () => {
+    // Without this, code that ignored `exists` and always returned
+    // systemPaths[0], or that iterated in reverse, would still pass every
+    // other test in this file. This is the only case that exercises the loop
+    // past its first iteration.
+    const result = resolveTool("imagemagick", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/usr/local/bin/magick",
+    });
+    expect(result).toBe("/usr/local/bin/magick");
+  });
+});
+
+describe("detectToolchain", () => {
+  test("omits tools that did not resolve rather than storing null", () => {
+    // exec.ts does a truthy check on these entries, so an unresolved tool must
+    // be ABSENT from the map, not present with a null value.
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/ffmpeg",
+    });
+    expect(toolchain).toEqual({ ffmpeg: "/opt/homebrew/bin/ffmpeg" });
+    expect("imagemagick" in toolchain).toBe(false);
+  });
+
+  test("resolves every known tool when all are present", () => {
+    const toolchain = detectToolchain({
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: () => true,
+    });
+    expect(Object.keys(toolchain).sort()).toEqual(Object.keys(KNOWN_TOOLS).sort());
+  });
+});
+
+describe("isSupportedPlatform", () => {
+  test("accepts darwin and win32, rejects everything else", () => {
+    expect(isSupportedPlatform("darwin")).toBe(true);
+    expect(isSupportedPlatform("win32")).toBe(true);
+    expect(isSupportedPlatform("linux")).toBe(false);
+    expect(isSupportedPlatform("Darwin")).toBe(false);
   });
 });
 ```
@@ -344,8 +414,15 @@ export const KNOWN_TOOLS: Record<ToolName, ToolSpec> = {
   },
 };
 
+/** The only platforms this app resolves tools for. Linux is out of scope. */
+export type SupportedPlatform = "darwin" | "win32";
+
+export function isSupportedPlatform(platform: string): platform is SupportedPlatform {
+  return platform === "darwin" || platform === "win32";
+}
+
 export interface ResolveOptions {
-  platform: string;
+  platform: SupportedPlatform;
   arch: string;
   bundleDir: string;
   exists?: (p: string) => boolean;
@@ -354,17 +431,23 @@ export interface ResolveOptions {
 export function resolveTool(name: ToolName, options: ResolveOptions): string | null {
   const spec = KNOWN_TOOLS[name];
   const exists = options.exists ?? existsSync;
-  const ext = options.platform === "win32" ? ".exe" : "";
+  const isWindows = options.platform === "win32";
 
-  const bundled = path.join(
+  // Join with the TARGET platform's separator, not the host's. Plain
+  // `path.join` uses whichever flavor the running machine has, which would
+  // build "C:\\app\\bin/win32-x64/magick.exe" when resolving a Windows
+  // path from a Mac.
+  const join = isWindows ? path.win32.join : path.posix.join;
+  const ext = isWindows ? ".exe" : "";
+
+  const bundled = join(
     options.bundleDir,
     `${options.platform}-${options.arch}`,
     `${spec.binary}${ext}`,
   );
   if (exists(bundled)) return bundled;
 
-  const systemPaths =
-    options.platform === "win32" ? spec.systemPaths.win32 : spec.systemPaths.darwin;
+  const systemPaths = isWindows ? spec.systemPaths.win32 : spec.systemPaths.darwin;
   for (const candidate of systemPaths) {
     if (exists(candidate)) return candidate;
   }
@@ -387,7 +470,7 @@ export function detectToolchain(options: ResolveOptions): Toolchain {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/toolchain.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -474,8 +557,12 @@ describe("createExecFile", () => {
     expect(String(err)).toContain("magick");
   });
 
-  test("never passes a shell option through", () => {
-    let seenOptions: unknown = { shell: true };
+  test("strips shell:true when a caller actually passes it", () => {
+    // The caller MUST pass { shell: true } as the 4th argument. An earlier
+    // version of this test never passed options at all, so `safeOptions` was
+    // always {} and the assertion held even with the `delete` removed. A test
+    // that cannot fail is worse than no test.
+    let seenOptions: unknown;
     const spawn = (
       _c: string,
       _a: string[],
@@ -486,9 +573,55 @@ describe("createExecFile", () => {
       cb(null, "", "");
     };
     const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
-    execFile("magick", [], () => {});
+    execFile("magick", [], () => {}, { shell: true } as never);
     expect(seenOptions).toBeDefined();
     expect((seenOptions as { shell?: unknown }).shell).toBeUndefined();
+  });
+
+  test("preserves other options while stripping shell", () => {
+    let seenOptions: Record<string, unknown> | undefined;
+    const spawn = (
+      _c: string,
+      _a: string[],
+      cb: (e: null, o: string, s: string) => void,
+      opts?: unknown,
+    ) => {
+      seenOptions = opts as Record<string, unknown>;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile({ magick: "/bin/magick" }, spawn);
+    execFile("magick", [], () => {}, { shell: true, maxBuffer: 4096 } as never);
+    expect(seenOptions?.maxBuffer).toBe(4096);
+    expect(seenOptions?.shell).toBeUndefined();
+  });
+
+  test("reports a missing tool asynchronously, never in the same tick", async () => {
+    // Real child_process.execFile always calls back on a later tick. If the
+    // missing-tool path called back synchronously, consumers would see
+    // different ordering depending on whether a tool happened to exist.
+    const execFile = createExecFile({});
+    const order: string[] = [];
+    await new Promise<void>((resolve) => {
+      execFile("magick", [], (err) => {
+        order.push(err ? "callback" : "unexpected-success");
+        resolve();
+      });
+      order.push("after-call");
+    });
+    expect(order).toEqual(["after-call", "callback"]);
+  });
+
+  test("rejects a relative resolved path rather than trusting cwd", () => {
+    // toolchain.ts is supposed to only ever produce absolute paths. If a
+    // relative one leaks through, Node resolves it against cwd, which is a
+    // silent, cwd-dependent failure. Fail loudly instead.
+    const execFile = createExecFile({ magick: "bin/magick" });
+    let err: Error | null = null;
+    execFile("magick", [], (e) => {
+      err = e;
+    });
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("absolute");
   });
 });
 ```
@@ -504,7 +637,11 @@ Expected: FAIL, cannot resolve module `src/main/engine/exec`.
 
 ```ts
 import { execFile as nodeExecFile } from "node:child_process";
+import path from "node:path";
 import type { ExecFileFn } from "./types";
+
+/** 64MB. Generous enough for image and video tool output; node defaults to 1MB. */
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 
 /** Maps the bare command name a converter uses to its resolved absolute path. */
 export type CommandMap = Record<string, string>;
@@ -523,12 +660,40 @@ export function createExecFile(
 ): ExecFileFn {
   return (cmd, args, callback, options) => {
     const resolved = commands[cmd];
+
+    // Report failures on a later tick. Real execFile is always async, and a
+    // callback that is sometimes sync and sometimes async makes consumer
+    // ordering depend on whether a tool happens to be installed.
+    const fail = (message: string) => {
+      queueMicrotask(() => callback(new Error(message), "", ""));
+    };
+
     if (!resolved) {
-      callback(new Error(`Tool not available: ${cmd}`), "", "");
+      fail(`Tool not available: ${cmd}`);
       return;
     }
-    const safeOptions = { ...(options ?? {}) };
-    delete (safeOptions as { shell?: unknown }).shell;
+    if (!path.isAbsolute(resolved)) {
+      fail(`Tool path must be absolute, got: ${resolved}`);
+      return;
+    }
+
+    const safeOptions: Record<string, unknown> = { ...(options ?? {}) };
+
+    // Never let a command string reach a shell parser.
+    delete safeOptions.shell;
+
+    // ExecFileFn's callback is typed for string stdout/stderr, but node decides
+    // Buffer-vs-string from options.encoding at RUNTIME. A converter passing
+    // "buffer" would hand Buffers to code that declares strings, and no type
+    // assertion can prevent that - so enforce the contract at the boundary.
+    if (safeOptions.encoding === "buffer") delete safeOptions.encoding;
+
+    // Lifted converters are byte-identical to upstream and never set maxBuffer,
+    // so without this they inherit node's 1MB default. ImageMagick and ffmpeg
+    // can exceed that on large files, failing in a way that reads as a broken
+    // conversion rather than a truncated pipe.
+    if (safeOptions.maxBuffer === undefined) safeOptions.maxBuffer = DEFAULT_MAX_BUFFER;
+
     return spawn(resolved, args, callback, safeOptions);
   };
 }
@@ -537,7 +702,7 @@ export function createExecFile(
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/exec.test.ts`
-Expected: PASS, 4 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -696,6 +861,109 @@ git commit -m "feat: lift ImageMagick converter from ConvertX with attribution"
 
 ---
 
+### Task 4b: Make the toolchain-to-command remap explicit and tested
+
+Raised by the Task 3 quality review. `Toolchain` is keyed by TOOL name (`imagemagick`); `CommandMap` is keyed by BINARY name (`magick`), because that is the bare string lifted converters actually pass to `execFile`. Both are `Record<string, string>`-shaped, so handing a `Toolchain` straight to `createExecFile` compiles cleanly and then silently resolves nothing - every conversion fails with `Tool not available: magick` while the tool sits correctly detected on disk. Task 7 does this remap inline, which leaves the invariant as tribal knowledge. Give it a name and a test.
+
+**Files:**
+- Modify: `src/main/engine/exec.ts` (add one exported function and two imports)
+- Modify: `tests/engine/exec.test.ts` (add one describe block)
+
+- [ ] **Step 1: Add the failing test**
+
+Append to `tests/engine/exec.test.ts`, after the existing `describe("createExecFile", ...)` block:
+
+```ts
+describe("toCommandMap", () => {
+  test("rekeys from tool name to the binary name converters actually call", () => {
+    // The whole point: Toolchain is keyed "imagemagick", but the lifted
+    // converter calls execFile("magick", ...). Without this remap the lookup
+    // misses and every conversion reports the tool as unavailable.
+    const commands = toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" });
+    expect(commands).toEqual({ magick: "/opt/homebrew/bin/magick" });
+  });
+
+  test("omits tools that did not resolve", () => {
+    const commands = toCommandMap({});
+    expect(commands).toEqual({});
+  });
+
+  test("round-trips through createExecFile so the wiring is proven end to end", () => {
+    // Guards the actual failure mode: passing the un-remapped Toolchain here
+    // would make this resolve nothing.
+    let seenCmd = "";
+    const spawn = (cmd: string, _a: string[], cb: (e: null, o: string, s: string) => void) => {
+      seenCmd = cmd;
+      cb(null, "", "");
+    };
+    const execFile = createExecFile(toCommandMap({ imagemagick: "/opt/homebrew/bin/magick" }), spawn);
+    execFile("magick", [], () => {});
+    expect(seenCmd).toBe("/opt/homebrew/bin/magick");
+  });
+});
+```
+
+Update the import at the top of the file to include the new function:
+
+```ts
+import { createExecFile, toCommandMap } from "../../src/main/engine/exec";
+```
+
+- [ ] **Step 2: Run and confirm failure**
+
+Run: `npx vitest run tests/engine/exec.test.ts`
+Expected: FAIL - `toCommandMap` is not exported.
+
+- [ ] **Step 3: Implement**
+
+In `src/main/engine/exec.ts`, add to the imports:
+
+```ts
+import { KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
+```
+
+and append this function to the end of the file:
+
+```ts
+/**
+ * Rekeys a Toolchain (keyed by tool name, e.g. "imagemagick") into a
+ * CommandMap (keyed by the bare binary name a lifted converter passes to
+ * execFile, e.g. "magick").
+ *
+ * These two shapes are both Record<string, string>, so skipping this step
+ * type-checks and then silently resolves nothing. Always go through here.
+ */
+export function toCommandMap(toolchain: Toolchain): CommandMap {
+  const commands: CommandMap = {};
+  for (const [name, resolved] of Object.entries(toolchain)) {
+    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
+  }
+  return commands;
+}
+```
+
+- [ ] **Step 4: Confirm pass**
+
+Run: `npx vitest run tests/engine/exec.test.ts`
+Expected: PASS, 10 tests.
+
+- [ ] **Step 5: Full suite and typecheck**
+
+Run: `npm test`
+Expected: 37 tests across 4 files (toolchain 11, exec 10, imagemagick 6, registry 10).
+
+Run: `npx tsc --noEmit; echo "exit=$?"`
+Expected: `exit=0`
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/main/engine/exec.ts tests/engine/exec.test.ts
+git commit -m "feat: add toCommandMap so the toolchain-to-binary remap is explicit"
+```
+
+---
+
 ### Task 5: Converter registry
 
 Builds the `from -> to -> converter` index, filtered to tools that actually resolved.
@@ -711,6 +979,7 @@ Builds the `from -> to -> converter` index, filtered to tools that actually reso
 ```ts
 import { describe, expect, test } from "vitest";
 import { buildRegistry } from "../../src/main/engine/registry";
+import { normalizeOutputFiletype } from "../../src/main/engine/normalizeFiletype";
 
 const fakeConverter = {
   properties: {
@@ -777,6 +1046,49 @@ describe("buildRegistry", () => {
     expect(registry.missingTools()).toEqual(["imagemagick"]);
   });
 
+  test("offers jpg, not jpeg, so the picker matches the produced filename", () => {
+    // Regression guard. The registry once folded outputs with the INPUT
+    // normalizer, so it advertised "jpeg" while the written file was ".jpg".
+    // A fake converter cannot catch this, hence the real format list below.
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    const outputs = registry.outputsFor("png");
+    expect(outputs).toContain("jpg");
+    expect(outputs).not.toContain("jpeg");
+  });
+
+  test("advertises only strings already in produced-filename form", () => {
+    // The strings the picker shows BECOME the file's extension. Advertising a
+    // spelling that normalizeOutputFiletype would rewrite means the UI and the
+    // file on disk disagree.
+    //
+    // This is the load-bearing regression guard. An earlier version of this
+    // test asserted only that both "jpg" and "jpeg" route to a converter,
+    // which passed against the BUGGY implementation too - there both spellings
+    // folded to "jpeg" and the buggy index also held "jpeg", so it matched by
+    // coincidence. This invariant genuinely fails pre-fix.
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    for (const output of registry.outputsFor("png")) {
+      expect(normalizeOutputFiletype(output), `advertised "${output}"`).toBe(output);
+    }
+  });
+
+  test("routes both jpg and jpeg spellings to the same converter", () => {
+    // Smoke test only. Note it cannot fail independently of the invariant
+    // above - do not treat it as regression coverage on its own.
+    const registry = buildRegistry(
+      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: "/bin/magick" },
+    );
+    expect(registry.converterFor("png", "jpg")?.name).toBe("imagemagick");
+    expect(registry.converterFor("png", "jpeg")?.name).toBe("imagemagick");
+  });
+
   test("output list is sorted and deduplicated", () => {
     const registry = buildRegistry(
       { imagemagick: { tool: "imagemagick", ...fakeConverter } },
@@ -798,7 +1110,7 @@ Expected: FAIL, cannot resolve module `src/main/engine/registry`.
 `src/main/engine/registry.ts`:
 
 ```ts
-import { normalizeFiletype } from "./normalizeFiletype";
+import { normalizeFiletype, normalizeOutputFiletype } from "./normalizeFiletype";
 import type { ToolName, Toolchain } from "./toolchain";
 import type { ExecFileFn } from "./types";
 
@@ -836,10 +1148,28 @@ export interface Registry {
   available(): ResolvedConverter[];
 }
 
-function flatten(formats: Record<string, string[]>): Set<string> {
+/**
+ * Input formats are folded with normalizeFiletype (jpg -> jpeg), because that
+ * is the spelling converters match on when deciding what they accept.
+ */
+function flattenInputs(formats: Record<string, string[]>): Set<string> {
   const out = new Set<string>();
   for (const list of Object.values(formats)) {
     for (const format of list) out.add(normalizeFiletype(format));
+  }
+  return out;
+}
+
+/**
+ * Output formats are folded with normalizeOutputFiletype (jpeg -> jpg),
+ * because these strings are BOTH what the picker shows the user and what the
+ * produced file is named. Using the input normalizer here would offer "jpeg"
+ * in the UI and then write a file called ".jpg".
+ */
+function flattenOutputs(formats: Record<string, string[]>): Set<string> {
+  const out = new Set<string>();
+  for (const list of Object.values(formats)) {
+    for (const format of list) out.add(normalizeOutputFiletype(format));
   }
   return out;
 }
@@ -861,8 +1191,8 @@ export function buildRegistry(
 
   const index = available.map((converter) => ({
     converter,
-    from: flatten(converter.properties.from),
-    to: flatten(converter.properties.to),
+    from: flattenInputs(converter.properties.from),
+    to: flattenOutputs(converter.properties.to),
   }));
 
   return {
@@ -878,7 +1208,9 @@ export function buildRegistry(
 
     converterFor(input, output) {
       const from = normalizeFiletype(input);
-      const to = normalizeFiletype(output);
+      // Normalize the requested output the same way the `to` set was built, so
+      // that both "jpg" and "jpeg" from a caller route to the same converter.
+      const to = normalizeOutputFiletype(output);
       for (const entry of index) {
         if (entry.from.has(from) && entry.to.has(to)) return entry.converter;
       }
@@ -899,7 +1231,7 @@ export function buildRegistry(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/registry.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -912,7 +1244,7 @@ git commit -m "feat: add converter registry filtered by available tools"
 
 ### Task 6: Job runner
 
-Runs conversions with a concurrency cap, per-job temp directories, progress events, and cleanup.
+Runs conversions with a concurrency cap, progress events, per-batch output-name collision handling, and a timeout that actually kills the child process. Note it does NOT create temp directories: converters write straight to the destination, so there is nothing to stage or clean up.
 
 **Files:**
 - Create: `src/main/engine/job.ts`
@@ -926,6 +1258,7 @@ Runs conversions with a concurrency cap, per-job temp directories, progress even
 import { describe, expect, test, vi } from "vitest";
 import { JobRunner } from "../../src/main/engine/job";
 import { buildRegistry } from "../../src/main/engine/registry";
+import { normalizeOutputFiletype } from "../../src/main/engine/normalizeFiletype";
 
 function registryWith(convert: () => Promise<string>) {
   return buildRegistry(
@@ -1009,6 +1342,33 @@ describe("JobRunner", () => {
       Array.from({ length: 6 }, (_, i) => ({ path: `/in/${i}.png`, output: "jpg" })),
     );
     expect(peak).toBeLessThanOrEqual(2);
+  });
+
+  test("always hands the converter an execFileOverride", async () => {
+    // Lifted converters default to raw node execFile, which resolves the bare
+    // command name through the inherited system PATH. That defeats the whole
+    // toolchain. The override is what pins the absolute path, so the runner
+    // must never call convert() without it.
+    let sawOverride: unknown = "never called";
+    const registry = buildRegistry(
+      {
+        fake: {
+          tool: "imagemagick",
+          properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
+          convert: async (_f, _t, _c, _p, _o, execFileOverride) => {
+            sawOverride = execFileOverride;
+            return "Done";
+          },
+        },
+      },
+      { imagemagick: "/bin/magick" },
+    );
+    const runner = new JobRunner(registry, {
+      commands: { magick: "/bin/magick" },
+      outputDirFor: () => "/out",
+    });
+    await runner.run([{ path: "/in/a.png", output: "jpg" }]);
+    expect(typeof sawOverride).toBe("function");
   });
 
   test("times out a hung conversion", async () => {
@@ -1145,13 +1505,132 @@ export class JobRunner extends EventEmitter {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/engine/job.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/main/engine/job.ts tests/engine/job.test.ts
 git commit -m "feat: add job runner with concurrency cap and timeouts"
+```
+
+---
+
+### Task 6b: Split tsconfig to enforce the layer boundary
+
+Raised by the Task 1 quality review. The single root `tsconfig.json` applies `types: ["node"]` and the DOM lib to every layer, so renderer code typechecks against `fs`, `child_process`, and `process` even though it runs with `nodeIntegration: false` and `sandbox: true`. TypeScript would not catch a renderer file importing a Node builtin; it would surface as a runtime crash. This must land before Tasks 7 and 8 write real main and renderer code.
+
+**Files:**
+- Create: `tsconfig.node.json`
+- Create: `tsconfig.web.json`
+- Modify: `tsconfig.json` (replace entirely)
+- Modify: `package.json` (the `build` script only)
+
+- [ ] **Step 1: Create `tsconfig.node.json` for main, preload, shared, and tests**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*", "*.config.ts"]
+}
+```
+
+Note there is no `DOM` lib here. Main-process code that references `document` or a DOM-flavored `fetch` type now fails to compile.
+
+- [ ] **Step 2: Create `tsconfig.web.json` for the renderer**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src/renderer/**/*", "src/shared/**/*"]
+}
+```
+
+`"types": []` is the load-bearing line. It removes `@types/node` from the renderer program, so a renderer file importing `node:fs` or referencing `process` now fails to compile. `src/shared/**/*` appears in both projects deliberately: shared IPC types must compile under both, which is exactly the constraint we want on them.
+
+- [ ] **Step 3: Replace `tsconfig.json` with a solution file**
+
+```json
+{
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}
+```
+
+- [ ] **Step 4: Point the build script at both projects**
+
+In `package.json`, change the `build` script from:
+
+```
+"build": "tsc --noEmit && electron-vite build",
+```
+
+to:
+
+```
+"build": "tsc -b tsconfig.node.json tsconfig.web.json && electron-vite build",
+```
+
+Leave every other script unchanged.
+
+- [ ] **Step 5: Verify both projects typecheck**
+
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
+
+Note: `tsc -b` with `noEmit` requires TypeScript 5.6 or newer. The installed version is 5.9.3, so this is fine.
+
+- [ ] **Step 6: Prove the boundary is actually enforced**
+
+This is the point of the task, so verify it rather than assuming. Temporarily append to `src/renderer/main.tsx`:
+
+```ts
+import { existsSync } from "node:fs";
+console.log(existsSync);
+```
+
+Run: `npx tsc -b tsconfig.web.json; echo "exit=$?"`
+Expected: NON-ZERO exit, with an error like `Cannot find module 'node:fs' or its corresponding type declarations`.
+
+If it exits 0, the boundary is not enforced and the task is not done. Investigate before proceeding.
+
+Then remove those two lines and re-run to confirm `exit=0` again.
+
+- [ ] **Step 7: Confirm the test suite still runs**
+
+Run: `npm test`
+Expected: all existing suites still pass. Vitest does not read `tsconfig.json` for test discovery, so this should be unaffected, but confirm rather than assume.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add tsconfig.json tsconfig.node.json tsconfig.web.json package.json
+git commit -m "build: split tsconfig so renderer cannot reference node builtins"
 ```
 
 ---
@@ -1274,6 +1753,15 @@ export interface ConverterApi {
   outputsFor(extension: string): Promise<string[]>;
   run(items: ConvertRequest[]): Promise<ConvertResult[]>;
   reveal(path: string): Promise<void>;
+  /**
+   * Resolves a dropped File to its absolute path.
+   *
+   * Electron 32 REMOVED `File.path`, so a renderer cannot read it directly any
+   * more; `webUtils.getPathForFile` in the preload is the replacement. Typed as
+   * `unknown` rather than `File` because this file compiles under both the node
+   * and web tsconfig projects, and the node project has no DOM lib.
+   */
+  pathForFile(file: unknown): string;
 }
 ```
 
@@ -1286,8 +1774,14 @@ import path from "node:path";
 import { convert as convertImagemagick, properties as propertiesImagemagick } from "./converters/imagemagick";
 import { JobRunner } from "./job";
 import { buildRegistry, type ConverterEntry, type Registry } from "./registry";
-import { detectToolchain, KNOWN_TOOLS, type ToolName, type Toolchain } from "./toolchain";
-import type { CommandMap } from "./exec";
+import {
+  detectToolchain,
+  isSupportedPlatform,
+  KNOWN_TOOLS,
+  type ToolName,
+  type Toolchain,
+} from "./toolchain";
+import { toCommandMap } from "./exec";
 
 const CONVERTERS: Record<string, ConverterEntry> = {
   imagemagick: {
@@ -1304,6 +1798,13 @@ export interface Engine {
 }
 
 export function createEngine(bundleDir: string): Engine {
+  // ResolveOptions.platform is narrowed to the platforms we actually ship, so
+  // an unsupported OS fails here with a clear message instead of silently
+  // resolving macOS paths.
+  if (!isSupportedPlatform(process.platform)) {
+    throw new Error(`Unsupported platform: ${process.platform}`);
+  }
+
   const toolchain = detectToolchain({
     platform: process.platform,
     arch: process.arch,
@@ -1312,10 +1813,9 @@ export function createEngine(bundleDir: string): Engine {
 
   const registry = buildRegistry(CONVERTERS, toolchain);
 
-  const commands: CommandMap = {};
-  for (const [name, resolved] of Object.entries(toolchain)) {
-    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
-  }
+  // Rekeys tool names to binary names. See toCommandMap's doc comment for why
+  // skipping this silently breaks every conversion.
+  const commands = toCommandMap(toolchain);
 
   const runner = new JobRunner(registry, {
     commands,
@@ -1403,7 +1903,7 @@ Note the dev-mode caveat: `enforceOffline` blocks the Vite dev server, which is 
 Replace the entire contents of `src/preload/index.ts`:
 
 ```ts
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC, type ConvertRequest, type ConverterApi } from "../shared/ipc";
 
 const api: ConverterApi = {
@@ -1411,6 +1911,9 @@ const api: ConverterApi = {
   outputsFor: (extension: string) => ipcRenderer.invoke(IPC.outputsFor, extension),
   run: (items: ConvertRequest[]) => ipcRenderer.invoke(IPC.run, items),
   reveal: (target: string) => ipcRenderer.invoke(IPC.reveal, target),
+  // `as never` avoids needing the DOM `File` type here: this file compiles
+  // under the node tsconfig project, which deliberately has no DOM lib.
+  pathForFile: (file: unknown) => webUtils.getPathForFile(file as never),
 };
 
 contextBridge.exposeInMainWorld("converter", api);
@@ -1418,8 +1921,8 @@ contextBridge.exposeInMainWorld("converter", api);
 
 - [ ] **Step 9: Verify typecheck passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
 - [ ] **Step 10: Commit**
 
@@ -1493,7 +1996,10 @@ export function App() {
     event.preventDefault();
     const dropped = event.dataTransfer.files[0];
     if (!dropped) return;
-    const path = window.converter ? (dropped as File & { path: string }).path : "";
+    // Electron 32 removed File.path. Reading it here would silently yield
+    // undefined and drag-and-drop would never work, so go through the preload's
+    // webUtils bridge instead.
+    const path = window.converter.pathForFile(dropped);
     const extension = dropped.name.split(".").pop() ?? "";
     setFile({ path, name: dropped.name, extension });
     setResults([]);
@@ -1579,10 +2085,12 @@ createRoot(document.getElementById("root")!).render(<App />);
 
 - [ ] **Step 4: Verify typecheck passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
-- [ ] **Step 5: Build and run the app for real**
+- [ ] **Step 5: Build and run the app for real** (MANUAL - a subagent cannot do this)
+
+This step needs a human at the keyboard: it involves launching a GUI and dragging a file onto a window. An automated worker should build, typecheck, and stop, leaving this for the user. Task 9 covers the same conversion path headlessly, so automated verification does not depend on this step.
 
 ImageMagick is not installed on this machine, so install it first:
 
@@ -1701,12 +2209,12 @@ Expected: PASS, 2 tests. If ImageMagick is not installed the suite skips rather 
 - [ ] **Step 4: Run the whole suite**
 
 Run: `npm test`
-Expected: all suites pass. Total should be 38 tests across 7 files: toolchain 6, exec 4, imagemagick 6, registry 8, job 6, offline 6, integration 2.
+Expected: all suites pass. Total should be 58 tests across 7 files: toolchain 11, exec 12, imagemagick 6, registry 11, job 10, offline 6, integration 2.
 
 - [ ] **Step 5: Verify typecheck still passes**
 
-Run: `npx tsc --noEmit`
-Expected: exits 0.
+Run: `npx tsc -b tsconfig.node.json tsconfig.web.json; echo "exit=$?"`
+Expected: `exit=0`.
 
 - [ ] **Step 6: Commit and push**
 
@@ -1721,7 +2229,7 @@ git push origin main
 ## Definition of Done
 
 - `npm test` passes with unit coverage of toolchain, exec, registry, job, offline, and the lifted converter, plus a real png to jpg integration test.
-- `npx tsc --noEmit` exits 0.
+- `npx tsc -b tsconfig.node.json tsconfig.web.json` exits 0, and a renderer file importing a Node builtin fails to compile.
 - `npm run build && npm start` opens a window, lists detected tools with absolute paths, and converts a dropped png to jpg with Reveal working.
 - No platform-specific path exists outside `src/main/engine/toolchain.ts`.
 - `THIRD_PARTY.md` records the ConvertX attribution and the AGPL-3.0 obligation.
