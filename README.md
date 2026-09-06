@@ -5,7 +5,7 @@
 <h1 align="center">Converter</h1>
 
 <p align="center">
-  A local file converter for macOS and Windows. Nothing you convert ever leaves your machine.
+  A local file converter for macOS and Windows
 </p>
 
 ---
