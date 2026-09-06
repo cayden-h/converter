@@ -14,6 +14,10 @@ extraResources:
     filter: ["**/*"]
 asar: true
 mac:
+  # Generated from build/icon.ico via iconutil. The source tops out at 256px,
+  # so the 512 and 1024 iconset entries are upscaled - a larger master would
+  # sharpen the Finder icon at big sizes.
+  icon: build/icon.icns
   target:
     - dmg
     - zip
