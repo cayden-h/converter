@@ -9,8 +9,13 @@ export interface ConverterProperties {
 }
 
 export interface ConverterEntry {
-  /** The tool this converter shells out to. */
-  tool: ToolName;
+  /**
+   * Every tool this converter shells out to. Plural because rasterTrace needs
+   * ImageMagick AND potrace - declaring one would offer the conversion while
+   * the other is missing, and it would fail at runtime with a bare
+   * "Tool not available".
+   */
+  tools: readonly ToolName[];
   /**
    * Higher wins when more than one converter claims a pair.
    *
@@ -87,10 +92,11 @@ export function buildRegistry(
   const missing = new Set<ToolName>();
 
   for (const [name, entry] of Object.entries(converters)) {
-    if (toolchain[entry.tool]) {
+    const missingForEntry = entry.tools.filter((tool) => !toolchain[tool]);
+    if (missingForEntry.length === 0) {
       available.push({ ...entry, name });
     } else {
-      missing.add(entry.tool);
+      for (const tool of missingForEntry) missing.add(tool);
     }
   }
 

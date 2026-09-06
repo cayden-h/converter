@@ -2,6 +2,13 @@ import path from "node:path";
 import { convert as convertImagemagick, properties as propertiesImagemagick } from "./converters/imagemagick";
 import { convert as convertFfmpeg, properties as propertiesFfmpeg } from "./converters/ffmpeg";
 import { convert as convertPoppler, properties as propertiesPoppler } from "./converters/poppler";
+import { convert as convertPandoc, properties as propertiesPandoc } from "./converters/pandoc";
+import { convert as convertResvg, properties as propertiesResvg } from "./converters/resvg";
+import { convert as convertDasel, properties as propertiesDasel } from "./converters/dasel";
+import { convert as convertPotrace, properties as propertiesPotrace } from "./converters/potrace";
+import { convert as convertRasterTrace, properties as propertiesRasterTrace } from "./converters/rasterTrace";
+import { convert as convertElectronPdf, properties as propertiesElectronPdf } from "./converters/electronPdf";
+import { renderPdf } from "../pdf";
 import { JobRunner } from "./job";
 import { buildRegistry, type ConverterEntry, type Registry } from "./registry";
 import {
@@ -34,12 +41,45 @@ export const MEDIA_INPUTS = new Set([
 ]);
 
 export const CONVERTERS: Record<string, ConverterEntry> = {
+  // Highest priority overall. It must beat pandoc for md -> pdf and html ->
+  // pdf: pandoc also claims md -> pdf, but only by delegating to a LaTeX
+  // engine this app does not ship, so pandoc's PDF path fails at runtime
+  // while this one, built on Electron's own Chromium, actually works.
+  electronPdf: {
+    // Declares pandoc rather than nothing: markdown input genuinely needs
+    // pandoc to get to HTML first (see electronPdf.ts), so the stricter
+    // dependency is the honest one - html -> pdf never touches pandoc, but
+    // offering the converter only when pandoc is present costs nothing and
+    // keeps the "every tool this converter might call" invariant intact.
+    tools: ["pandoc"],
+    priority: 40,
+    properties: propertiesElectronPdf,
+    convert: (filePath, fileType, convertTo, targetPath, options, execFileOverride) =>
+      convertElectronPdf(filePath, fileType, convertTo, targetPath, options, execFileOverride, renderPdf),
+  },
+  // Highest priority for PDF input: ImageMagick can read PDFs only through a
+  // ghostscript delegate that is often absent, and it rasterizes badly.
+  poppler: {
+    tools: ["poppler"],
+    priority: 30,
+    properties: propertiesPoppler,
+    convert: convertPoppler,
+  },
+  // Must beat ImageMagick, which also claims svg as an output format but
+  // produces an svg with an embedded bitmap rather than real vector paths.
+  // rasterTrace is the one that actually traces.
+  rasterTrace: {
+    tools: ["imagemagick", "potrace"],
+    priority: 25,
+    properties: propertiesRasterTrace,
+    convert: convertRasterTrace,
+  },
   // ffmpeg wins when the INPUT is a video or audio container, and yields on
   // stills. A constant would be wrong in both directions: ranking it above
   // ImageMagick reroutes png -> jpg through ffmpeg, and ranking it below sends
   // mp4 -> gif to ImageMagick, whose mp4 delegate is frequently broken.
   ffmpeg: {
-    tool: "ffmpeg",
+    tools: ["ffmpeg"],
     priority: (input: string) => (MEDIA_INPUTS.has(input) ? 30 : 5),
     properties: propertiesFfmpeg,
     convert: (filePath, fileType, convertTo, targetPath, options, execFileOverride) =>
@@ -52,19 +92,42 @@ export const CONVERTERS: Record<string, ConverterEntry> = {
         execFileOverride ? (toFfmpegExecFile(execFileOverride) as never) : undefined,
       ),
   },
+  // Must beat ImageMagick for svg input: resvg exists specifically to
+  // rasterize svg correctly, where ImageMagick's own svg delegate is
+  // inconsistent.
+  resvg: {
+    tools: ["resvg"],
+    priority: 15,
+    properties: propertiesResvg,
+    convert: convertResvg,
+  },
   imagemagick: {
-    tool: "imagemagick",
+    tools: ["imagemagick"],
     priority: 10,
     properties: propertiesImagemagick,
     convert: convertImagemagick,
   },
-  // Highest priority for PDF input: ImageMagick can read PDFs only through a
-  // ghostscript delegate that is often absent, and it rasterizes badly.
-  poppler: {
-    tool: "poppler",
-    priority: 30,
-    properties: propertiesPoppler,
-    convert: convertPoppler,
+  // Declared before pandoc: pandoc's own tables also claim csv -> json (via
+  // its generic reader/writer pair), and both sit at priority 10 by design -
+  // ties go to whichever candidate the registry sees first, so dasel, the
+  // tool actually built for structured data, must come first in this object.
+  dasel: {
+    tools: ["dasel"],
+    priority: 10,
+    properties: propertiesDasel,
+    convert: convertDasel,
+  },
+  pandoc: {
+    tools: ["pandoc"],
+    priority: 10,
+    properties: propertiesPandoc,
+    convert: convertPandoc,
+  },
+  potrace: {
+    tools: ["potrace"],
+    priority: 10,
+    properties: propertiesPotrace,
+    convert: convertPotrace,
   },
 };
 

@@ -6,7 +6,7 @@ function registryWith(convert: () => Promise<string>) {
   return buildRegistry(
     {
       fake: {
-        tool: "imagemagick",
+        tools: ["imagemagick"],
         priority: 10,
         // "jpeg" is included alongside "png" so the collision test below can
         // route both a.png and a.jpeg to jpg without an unrelated routing
@@ -106,7 +106,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "imagemagick",
+          tools: ["imagemagick"],
           priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           convert: async (_f, _t, _c, _p, _o, execFileOverride) => {
@@ -168,7 +168,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "imagemagick",
+          tools: ["imagemagick"],
           priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           // Never settles, so the timeout always wins the race.
@@ -198,7 +198,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "imagemagick",
+          tools: ["imagemagick"],
           priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           convert: async (_f, fileType) => {
@@ -239,7 +239,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "ffmpeg",
+          tools: ["ffmpeg"],
           priority: 20,
           properties: { from: { video: ["mov"] }, to: { video: ["av1.mp4"] } },
           convert: async () => "Done",
@@ -264,7 +264,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "ffmpeg",
+          tools: ["ffmpeg"],
           priority: 20,
           properties: { from: { video: ["mov"] }, to: { video: ["av1.mp4"] } },
           convert: async (_f, _t, convertTo) => {
@@ -313,7 +313,7 @@ describe("JobRunner", () => {
     const registry = buildRegistry(
       {
         fake: {
-          tool: "imagemagick",
+          tools: ["imagemagick"],
           priority: 10,
           properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
           convert: (_f, _t, _c, _p, _o, execFileOverride) =>

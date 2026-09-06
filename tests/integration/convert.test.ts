@@ -8,6 +8,10 @@ import {
   ensureVideoFixture,
   ensurePdfFixture,
   ensureHeicFixture,
+  ensureMarkdownFixture,
+  ensureHtmlFixture,
+  ensureSvgFixture,
+  ensureCsvFixture,
 } from "../fixtures/make-fixtures";
 
 const engine = createEngine("/nonexistent-bundle-dir");
@@ -105,3 +109,98 @@ describe.skipIf(!engine.toolchain.poppler || !engine.toolchain.imagemagick)(
     });
   },
 );
+
+describe.skipIf(!engine.toolchain.pandoc)("real pandoc conversion", () => {
+  test("converts markdown to html and writes real html", async () => {
+    const input = ensureMarkdownFixture();
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "html" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const output = readFileSync(results[0]!.outputPath!, "utf8");
+    // pandoc.ts's real invocation does not pass `-s`, so pandoc emits an HTML
+    // FRAGMENT, not a standalone document with an <html> wrapper - asserting
+    // "<html" here would be asserting a document shape this converter never
+    // produces. Assert what it genuinely writes instead: the markdown's
+    // structure and formatting, actually converted.
+    expect(output).toContain("<h1");
+    expect(output).toContain("<strong>bold</strong>");
+  });
+});
+
+/**
+ * md -> pdf and html -> pdf both route through electronPdf, whose renderer
+ * calls electron's BrowserWindow.webContents.printToPDF. That API only exists
+ * inside a real Electron app process (after `app.whenReady()`), not under
+ * plain node/vitest - requiring "electron" outside the Electron binary
+ * resolves to a path STRING, not the module, so `BrowserWindow` is undefined
+ * here. Faking a renderer would prove nothing about whether real PDF
+ * generation works, so these are skipped rather than given a fake that would
+ * "pass" regardless of whether the real path is broken.
+ */
+describe.skip("real electronPdf conversion (requires a live Electron app context)", () => {
+  test("converts markdown to pdf and writes a real PDF", async () => {
+    const input = ensureMarkdownFixture();
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "pdf" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 4);
+    expect(Buffer.from(header).toString()).toBe("%PDF");
+  });
+
+  test("converts html to pdf and writes a real PDF", async () => {
+    const input = ensureHtmlFixture();
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "pdf" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 4);
+    expect(Buffer.from(header).toString()).toBe("%PDF");
+  });
+});
+
+describe.skipIf(!engine.toolchain.resvg)("real resvg conversion", () => {
+  test("converts svg to png and writes a valid PNG", async () => {
+    const input = ensureSvgFixture();
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "png" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const header = readFileSync(results[0]!.outputPath!).subarray(0, 4);
+    expect([...header]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+});
+
+describe.skipIf(!engine.toolchain.imagemagick || !engine.toolchain.potrace)(
+  "real rasterTrace conversion",
+  () => {
+    test("converts png to svg and traces real vector paths", async () => {
+      // Assert both the wrapper AND a <path>: potrace on a badly-thresholded
+      // bitmap can emit a valid but EMPTY svg (just the <svg> wrapper, no
+      // paths), which would be a silent no-op that a wrapper-only assertion
+      // would miss entirely.
+      const input = ensurePngFixture(engine.toolchain.imagemagick!);
+      const runner = createEngine("/nonexistent-bundle-dir").runner;
+      runner.options = { ...runner.options, outputDirFor: () => outDir };
+      const results = await runner.run([{ path: input, output: "svg" }]);
+      expect(results[0]?.ok, results[0]?.error).toBe(true);
+      const output = readFileSync(results[0]!.outputPath!, "utf8");
+      expect(output).toContain("<svg");
+      expect(output).toContain("<path");
+    });
+  },
+);
+
+describe.skipIf(!engine.toolchain.dasel)("real dasel conversion", () => {
+  test("converts csv to json and writes valid json with the expected keys", async () => {
+    const input = ensureCsvFixture();
+    const runner = createEngine("/nonexistent-bundle-dir").runner;
+    runner.options = { ...runner.options, outputDirFor: () => outDir };
+    const results = await runner.run([{ path: input, output: "json" }]);
+    expect(results[0]?.ok, results[0]?.error).toBe(true);
+    const parsed = JSON.parse(readFileSync(results[0]!.outputPath!, "utf8"));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0]).toMatchObject({ name: "Ada", age: "30" });
+  });
+});

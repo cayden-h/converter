@@ -7,7 +7,7 @@ function registryWith(convert: () => Promise<string>) {
   return buildRegistry(
     {
       fake: {
-        tool: "imagemagick",
+        tools: ["imagemagick"],
         priority: 10,
         properties: { from: { images: ["png"] }, to: { images: ["jpeg"] } },
         convert,

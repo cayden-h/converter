@@ -14,7 +14,7 @@ const fakeConverter = {
 describe("buildRegistry", () => {
   test("omits a converter whose tool did not resolve", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       {},
     );
     expect(registry.outputsFor("png")).toEqual([]);
@@ -22,7 +22,7 @@ describe("buildRegistry", () => {
 
   test("includes a converter whose tool resolved", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.outputsFor("png")).toContain("webp");
@@ -30,7 +30,7 @@ describe("buildRegistry", () => {
 
   test("normalizes the input extension before lookup", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.outputsFor("JPG")).toContain("webp");
@@ -38,7 +38,7 @@ describe("buildRegistry", () => {
 
   test("returns an empty list for an unsupported input", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.outputsFor("xyz")).toEqual([]);
@@ -46,7 +46,7 @@ describe("buildRegistry", () => {
 
   test("finds the converter for a supported pair", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.converterFor("png", "webp")?.name).toBe("imagemagick");
@@ -54,7 +54,7 @@ describe("buildRegistry", () => {
 
   test("returns null for an unroutable pair", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.converterFor("png", "mp4")).toBeNull();
@@ -62,7 +62,7 @@ describe("buildRegistry", () => {
 
   test("reports which tools are missing", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       {},
     );
     expect(registry.missingTools()).toEqual(["imagemagick"]);
@@ -72,7 +72,7 @@ describe("buildRegistry", () => {
     // Regression guard. The registry once folded outputs with the INPUT
     // normalizer, so it advertised "jpeg" while the written file was ".jpg".
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     const outputs = registry.outputsFor("png");
@@ -90,7 +90,7 @@ describe("buildRegistry", () => {
     // implementation too - there both folded to "jpeg" and the buggy index
     // also held "jpeg", so it matched by coincidence.
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     for (const output of registry.outputsFor("png")) {
@@ -102,7 +102,7 @@ describe("buildRegistry", () => {
     // Smoke test only. It cannot fail independently of the invariant above -
     // do not treat it as regression coverage on its own.
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     expect(registry.converterFor("png", "jpg")?.name).toBe("imagemagick");
@@ -111,7 +111,7 @@ describe("buildRegistry", () => {
 
   test("output list is sorted and deduplicated", () => {
     const registry = buildRegistry(
-      { imagemagick: { tool: "imagemagick", ...fakeConverter } },
+      { imagemagick: { tools: ["imagemagick"], ...fakeConverter } },
       { imagemagick: "/bin/magick" },
     );
     const outputs = registry.outputsFor("png");
@@ -123,13 +123,13 @@ describe("buildRegistry", () => {
     // policy this is decided by Object.entries() order, which is invisible and
     // silently reorderable by anyone editing the converters record.
     const stills = {
-      tool: "imagemagick" as const,
+      tools: ["imagemagick"] as const,
       priority: 10,
       properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
       convert: async () => "stills",
     };
     const motion = {
-      tool: "ffmpeg" as const,
+      tools: ["ffmpeg"] as const,
       priority: 20,
       properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
       convert: async () => "motion",
@@ -145,13 +145,13 @@ describe("buildRegistry", () => {
     // Same two converters, reversed in the record. If the result changed, the
     // policy would still secretly be insertion order.
     const stills = {
-      tool: "imagemagick" as const,
+      tools: ["imagemagick"] as const,
       priority: 10,
       properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
       convert: async () => "stills",
     };
     const motion = {
-      tool: "ffmpeg" as const,
+      tools: ["ffmpeg"] as const,
       priority: 20,
       properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
       convert: async () => "motion",
@@ -168,15 +168,36 @@ describe("buildRegistry", () => {
     expect(reversed.converterFor("gif", "png")?.name).toBe("ffmpeg");
   });
 
+  test("a converter needing two tools is offered only when both resolve", () => {
+    // rasterTrace shells out to magick AND potrace. Declaring one dependency
+    // would advertise png -> svg while the other tool is missing, and the
+    // conversion would fail at runtime with "Tool not available".
+    const composite = {
+      tools: ["imagemagick", "potrace"] as const,
+      priority: 25,
+      properties: { from: { images: ["png"] }, to: { images: ["svg"] } },
+      convert: async () => "Done",
+    };
+    const both = buildRegistry(
+      { rasterTrace: composite },
+      { imagemagick: "/bin/magick", potrace: "/bin/potrace" },
+    );
+    expect(both.converterFor("png", "svg")?.name).toBe("rasterTrace");
+
+    const onlyOne = buildRegistry({ rasterTrace: composite }, { imagemagick: "/bin/magick" });
+    expect(onlyOne.converterFor("png", "svg"), "must not offer with potrace missing").toBeNull();
+    expect(onlyOne.missingTools()).toContain("potrace");
+  });
+
   test("falls back to the available converter when the preferred tool is missing", () => {
     const stills = {
-      tool: "imagemagick" as const,
+      tools: ["imagemagick"] as const,
       priority: 10,
       properties: { from: { images: ["gif"] }, to: { images: ["png"] } },
       convert: async () => "stills",
     };
     const motion = {
-      tool: "ffmpeg" as const,
+      tools: ["ffmpeg"] as const,
       priority: 20,
       properties: { from: { video: ["gif"] }, to: { video: ["png"] } },
       convert: async () => "motion",
@@ -193,13 +214,13 @@ describe("buildRegistry", () => {
     // cannot express that, because the two converters contest every common
     // still format AND several video ones.
     const stills = {
-      tool: "imagemagick" as const,
+      tools: ["imagemagick"] as const,
       priority: 10,
       properties: { from: { images: ["png", "mp4"] }, to: { images: ["gif"] } },
       convert: async () => "stills",
     };
     const motion = {
-      tool: "ffmpeg" as const,
+      tools: ["ffmpeg"] as const,
       priority: (input: string) => (input === "mp4" ? 30 : 5),
       properties: { from: { muxer: ["png", "mp4"] }, to: { muxer: ["gif"] } },
       convert: async () => "motion",
@@ -215,7 +236,7 @@ describe("buildRegistry", () => {
   test("normalizes the input before asking a converter to rank itself", () => {
     const seen: string[] = [];
     const probe = {
-      tool: "ffmpeg" as const,
+      tools: ["ffmpeg"] as const,
       priority: (input: string) => {
         seen.push(input);
         return 1;

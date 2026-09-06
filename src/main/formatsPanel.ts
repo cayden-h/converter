@@ -14,6 +14,9 @@ const WIRED_INSTALL_HINTS: Record<ToolName, string> = {
   ffprobe: "brew install ffmpeg",
   poppler: "brew install poppler",
   pandoc: "brew install pandoc",
+  resvg: "brew install resvg",
+  dasel: "brew install dasel",
+  potrace: "brew install potrace",
 };
 
 /**
