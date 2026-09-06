@@ -25,11 +25,16 @@
  * potrace were never installed. A pass there is real evidence that the
  * bundle is self-contained.
  *
- * Two honest limits remain. Pandoc IS preinstalled on GitHub's Windows
- * runners, so for that one tool the "clean machine" argument does not apply
- * and the in-bundle path assertion below is doing all the work. And no
- * automated test on any platform checks what the WINDOW looks like - the
- * macOS-only chrome guard in src/main/windowOptions.ts is verified by a
+ * Two honest limits remain. ImageMagick IS preinstalled on that image
+ * (7.1.2-25 on windows-2025, checked against the runner-images manifest),
+ * so for that one tool the "clean machine" argument does not apply and the
+ * in-bundle path assertion below is doing all the work - without it, a
+ * missing bundled magick.exe would quietly resolve to the runner's copy and
+ * every conversion would still pass. Pandoc, ffmpeg, poppler, resvg, dasel
+ * and potrace are genuinely absent from the image.
+ *
+ * And no automated test on any platform checks what the WINDOW looks like -
+ * the macOS-only chrome guard in src/main/windowOptions.ts is verified by a
  * human on a real desktop or not at all.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
