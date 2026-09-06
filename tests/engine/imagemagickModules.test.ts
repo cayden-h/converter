@@ -53,11 +53,32 @@ describe.skipIf(!existsSync(MAGICK))("bundled ImageMagick", () => {
   });
 
   test("nothing in the bundle links homebrew", () => {
+    // This once used `-exec otool -L {} \\;` inside a template literal. JS
+    // drops the backslash from `\\;`, so bash saw a BARE `;`, split the line
+    // into two commands, and ran `find ... -exec otool -L {}` with no
+    // terminator. find died, grep read empty stdin and printed 0, and this
+    // assertion passed without a single binary being examined. `-exec ... +`
+    // needs no terminator and cannot be broken the same way.
+    const files = execFileSync(
+      "bash",
+      ["-c", `find ${BUNDLE} -type f \\( -perm +111 -o -name '*.dylib' \\)`],
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .filter((line) => line.length > 0);
+
+    // Assert the search actually found something. Without this, a bundle that
+    // failed to build reports zero homebrew references and looks like a pass -
+    // the same vacuous green this test just spent its life giving.
+    expect(files.length).toBeGreaterThan(20);
+
+    // otool's stderr is dropped, not its stdout: it exits non-zero on any
+    // non-Mach-O file that matched the executable-bit filter.
     const count = execFileSync(
       "bash",
       [
         "-c",
-        `find ${BUNDLE} -type f \\( -perm +111 -o -name '*.dylib' \\) -exec otool -L {} \; 2>/dev/null | grep -c '/opt/homebrew' || true`,
+        `find ${BUNDLE} -type f \\( -perm +111 -o -name '*.dylib' \\) -exec otool -L {} + 2>/dev/null | grep -c '/opt/homebrew' || true`,
       ],
       { encoding: "utf8" },
     );

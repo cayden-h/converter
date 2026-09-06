@@ -11,7 +11,10 @@
     "start": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "vendor": "npx tsx scripts/vendor-binaries.ts"
+    "vendor": "npx tsx scripts/vendor-binaries.ts",
+    "vendor:win": "npx tsx scripts/vendor-binaries-win.ts",
+    "digests:win": "npx tsx scripts/vendor-binaries-win.ts --print-digests",
+    "dist:win": "npx electron-builder --win"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

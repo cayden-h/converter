@@ -9,3 +9,4 @@ resources/bin/
 
 # Generated test fixtures (created on demand by tests/fixtures/make-fixtures.ts)
 tests/fixtures/sample.*
+tests/fixtures/sample-*

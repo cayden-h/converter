@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
+      - name: Vendor the Windows tools
+        run: npm run vendor:win
+
+      - run: npm run build
+
+      - run: npm test
+
+      # --x64 is required. Without it electron-builder targets the host arch
+      # and writes release/win-arm64-unpacked, which the packaged test does
+      # not look for - it would skip instead of fail, and the skip reads as
+      # a pass.
+      - name: Package (unpacked)
+        run: npx electron-builder --win --dir --x64
+
+      # Runs only now that release/win-unpacked exists. This is the step that
+      # proves the bundle is self-contained: every resolved tool path must be
+      # inside the packaged tree, and real conversions must produce output
+      # verified by magic bytes.
+      - name: Packaged app test
+        run: npx vitest run tests/integration/packaged.test.ts
+        env:
+          EXPECT_PACKAGED_APP: "1"

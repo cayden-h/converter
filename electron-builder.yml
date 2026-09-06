@@ -27,3 +27,25 @@ mac:
   # Development identity, which cannot notarize. `null` makes electron-builder
   # skip its own signing so the vendor script's ad-hoc signatures survive.
   identity: null
+win:
+  # build/icon.ico is the SOURCE the mac .icns was generated from, so it is
+  # already in the repo at its native resolution.
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # No code signing: there is no Windows certificate, so SmartScreen shows an
+  # unrecognised-app warning on first run. This is the Windows counterpart of
+  # the unnotarized macOS build, and is documented in the README rather than
+  # left for the user to discover.
+nsis:
+  # Per-user install, so no UAC prompt. A machine-wide install would need
+  # elevation for an app that writes nothing outside the user's own files.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-setup.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

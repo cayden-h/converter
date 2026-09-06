@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Downloads roughly 262 MB every run. Shells out to 7-Zip, which is
+      # preinstalled on this image. Caching the extracted tools was tried and
+      # removed: the script re-downloads and re-verifies regardless, so the
+      # cache only added restore and upload time.
+      - name: Vendor the Windows tools
+        run: npm run vendor:win
+
+      - run: npm run build
+
+      - run: npm test
+
+      # Package unpacked and test it BEFORE anything is published. Publishing
+      # an installer whose bundled tools were never exercised is the failure
+      # this ordering prevents.
+      - name: Package (unpacked)
+        run: npx electron-builder --win --dir --x64
+
+      - name: Packaged app test
+        run: npx vitest run tests/integration/packaged.test.ts
+        env:
+          EXPECT_PACKAGED_APP: "1"
+
+      # Publish ONLY from a tag. electron-builder derives the release tag from
+      # package.json's version, so --publish always on a manual dispatch would
+      # upload assets into whatever release already carries that version and
+      # overwrite a shipped artifact with a build from an arbitrary commit.
+      - name: Build and publish the installers
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the installers without publishing
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --win --publish never
+
+      # A manual dispatch deliberately does not publish, so the artifact store
+      # is the only way to reach the .exe files it builds.
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            release/*setup.exe
+            release/*portable.exe
