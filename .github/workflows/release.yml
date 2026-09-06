@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache vendored tools
+        uses: actions/cache@v4
+        with:
+          path: resources/bin/win32-x64
+          key: win-tools-${{ hashFiles('scripts/vendor-binaries-win.ts') }}
+
+      - name: Vendor the Windows tools
+        run: npm run vendor:win
+
+      - run: npm run build
+
+      - run: npm test
+
+      # Package unpacked and test it BEFORE anything is published. Publishing
+      # an installer whose bundled tools were never exercised is the failure
+      # this ordering prevents.
+      - name: Package (unpacked)
+        run: npx electron-builder --win --dir --x64
+
+      - name: Packaged app test
+        run: npx vitest run tests/integration/packaged.test.ts
+
+      - name: Build and publish the installers
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # workflow_dispatch runs produce no GitHub Release, so without this the
+      # .exe files from a manual run would be unreachable.
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            release/*setup.exe
+            release/*portable.exe
