@@ -134,6 +134,7 @@ export function App() {
                 extension={file.extension}
                 status={row.status}
                 error={row.error}
+                target={target}
                 outputPath={row.outputPath}
                 onReveal={() => window.converter.reveal(row.outputPath!)}
                 onOpen={() => window.converter.openPath(row.outputPath!)}

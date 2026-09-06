@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icon.ico" width="120" alt="Converter">
+  <img src="build/icon.png" width="128" alt="Converter">
 </p>
 
 <h1 align="center">Converter</h1>

@@ -1,3 +1,5 @@
+import { friendlyError } from "../../shared/friendlyError";
+
 export type RowStatus = "queued" | "converting" | "done" | "failed";
 
 interface ResultRowProps {
@@ -5,6 +7,8 @@ interface ResultRowProps {
   extension: string;
   status: RowStatus;
   error?: string;
+  /** Requested output format, so the message can name it. */
+  target?: string;
   outputPath?: string;
   onReveal(): void;
   onOpen(): void;
@@ -24,7 +28,8 @@ const STATUS_CLASS: Record<RowStatus, string> = {
   failed: "text-ink",
 };
 
-export function ResultRow({ name, extension, status, error, outputPath, onReveal, onOpen }: ResultRowProps) {
+export function ResultRow({ name, extension, status, error, target, outputPath, onReveal, onOpen }: ResultRowProps) {
+  const failure = error ? friendlyError(error, { from: extension, to: target ?? "" }) : null;
   return (
     <li className="flex flex-col gap-1 rounded-lg border border-border bg-elevated px-3 py-2">
       <div className="flex items-center justify-between gap-3">
@@ -56,8 +61,26 @@ export function ResultRow({ name, extension, status, error, outputPath, onReveal
           )}
         </div>
       </div>
-      {status === "failed" && error && (
-        <p className="text-xs text-ink">{error}</p>
+      {status === "failed" && failure && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-ink">{failure.message}</p>
+          {/*
+            The raw tool output is kept rather than discarded: it is the only
+            thing that helps when the friendly message does not fit the case.
+            It is collapsed so it does not shout at someone who just wants to
+            know their file did not convert.
+          */}
+          {failure.detail !== failure.message && (
+            <details className="text-xs text-muted">
+              <summary className="cursor-pointer select-none hover:text-ink">
+                Technical details
+              </summary>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-surface px-2 py-1 text-[11px] leading-snug">
+                {failure.detail}
+              </pre>
+            </details>
+          )}
+        </div>
       )}
       {status === "done" && outputPath && (
         <p className="truncate text-xs text-muted">{outputPath}</p>
