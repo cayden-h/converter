@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { convert, properties } from "../../src/main/engine/converters/poppler";
 import type { ExecFileFn } from "../../src/main/engine/types";
@@ -42,7 +43,7 @@ describe("poppler converter", () => {
       cb(null, "", "");
     };
     await convert("/tmp/in.pdf", "pdf", "png", "/tmp/out.png", {}, mock);
-    expect(seen[seen.length - 1]).toBe("/tmp/out");
+    expect(seen[seen.length - 1]).toBe(path.join("/tmp", "out"));
   });
 
   test("renders only the first page by default", async () => {

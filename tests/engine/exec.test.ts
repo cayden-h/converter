@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { createExecFile, toCommandMap, nodeSpawn, toFfmpegExecFile } from "../../src/main/engine/exec";
 
@@ -179,7 +180,7 @@ describe("toCommandMap", () => {
   test("maps every binary of a suite, not just the primary", () => {
     const commands = toCommandMap({ poppler: "/opt/homebrew/bin/pdftoppm" });
     expect(commands.pdftoppm).toBe("/opt/homebrew/bin/pdftoppm");
-    expect(commands.pdftotext).toBe("/opt/homebrew/bin/pdftotext");
+    expect(commands.pdftotext).toBe(path.join("/opt/homebrew/bin", "pdftotext"));
   });
 
   test("round-trips through createExecFile so the wiring is proven end to end", () => {
