@@ -5,6 +5,7 @@ import { createEngine } from "./engine";
 import { enforceOffline } from "./offline";
 import { forwardProgress } from "./progress";
 import { buildToolStatuses } from "./formatsPanel";
+import { chromeOptionsFor } from "./windowOptions";
 import { IPC, type ConvertRequest } from "../shared/ipc";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,8 +21,7 @@ function createWindow(): void {
   const window = new BrowserWindow({
     width: 900,
     height: 640,
-    titleBarStyle: "hiddenInset",
-    vibrancy: "sidebar",
+    ...chromeOptionsFor(process.platform),
     webPreferences: {
       preload: path.join(dirname, "../preload/index.js"),
       contextIsolation: true,
