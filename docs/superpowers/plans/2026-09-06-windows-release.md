@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-06-windows-release-design.md`
 
-**Branch:** `feat/windows-release`, off `master`.
+**Branch:** `feat/windows-release`, off `main`.
 
 ---
 
@@ -26,7 +26,7 @@
 | `tests/integration/packaged.test.ts` | **Modify.** Parameterize the packaged-app path over platform. |
 | `electron-builder.yml` | **Modify.** Add the `win` and `nsis` sections. |
 | `package.json` | **Modify.** Add `vendor:win`, `digests:win`, `dist:win`. |
-| `.github/workflows/ci.yml` | **Create.** Build and test on every PR and master push. |
+| `.github/workflows/ci.yml` | **Create.** Build and test on every PR and main push. |
 | `.github/workflows/release.yml` | **Create.** Publish on `v*` tag and `workflow_dispatch`. |
 | `README.md` | **Modify.** Windows install section and the SmartScreen note. |
 
@@ -41,7 +41,7 @@
 - [ ] **Step 1: Create the branch**
 
 ```bash
-git checkout master
+git checkout main
 git checkout -b feat/windows-release
 ```
 
@@ -861,7 +861,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
 
 jobs:
   windows:
@@ -1067,7 +1067,7 @@ npx -y gh-axi pr create --title "feat: Windows release" \
 - [ ] **Step 2: After merge, tag a release**
 
 ```bash
-git checkout master
+git checkout main
 git pull
 git tag v0.1.0
 git push origin v0.1.0
