@@ -317,6 +317,15 @@ describe("SOURCES", () => {
     }
   });
 
+  test("a raw source declares exactly one member", () => {
+    // main()'s raw branch takes Object.values(members)[0] as the destination.
+    // More than one entry would silently drop the rest; zero would throw only
+    // once someone ran the vendoring on an actual Windows machine.
+    for (const source of SOURCES.filter((candidate) => candidate.archive === "raw")) {
+      expect(Object.keys(source.members), `${source.name} is raw`).toHaveLength(1);
+    }
+  });
+
   test("resvg stays pinned to a release that ships a Windows asset", () => {
     // resvg v0.48.0 and v0.48.1 publish macOS assets ONLY. v0.47.0 is the
     // most recent release with resvg-win64.zip. Bumping this forward without
@@ -565,7 +574,17 @@ Add to the top of `scripts/vendor-binaries-win.ts`, alongside the existing impor
 
 ```ts
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 ```
@@ -646,9 +665,9 @@ async function main(): Promise<void> {
   }
 
   if (process.platform !== "win32") {
-    // Not a hard requirement of the downloads, but the extracted .exe files
-    // are only useful in a Windows build, and running this on a Mac silently
-    // produces a directory that the mac packaging step would then ship.
+    // The downloads would work anywhere, but the extracted files are Windows
+    // executables. Running this on a Mac would leave a win32-x64 directory
+    // that the macOS packaging step would then happily ship.
     throw new Error(
       "vendor-binaries-win.ts extracts Windows executables and must run on Windows. " +
         "Use `npm run digests:win` if you only need to refresh the digests.",
@@ -656,12 +675,12 @@ async function main(): Promise<void> {
   }
 
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const binDir = path.join(repoRoot, "resources", "bin", "win32-x64", "bin");
-
-  rmSync(path.join(repoRoot, "resources", "bin", "win32-x64"), { recursive: true, force: true });
-  mkdirSync(binDir, { recursive: true });
+  const bundleRoot = path.join(repoRoot, "resources", "bin", "win32-x64");
+  const binDir = path.join(bundleRoot, "bin");
 
   const staging = mkdtempSync(path.join(tmpdir(), "converter-vendor-win-"));
+  const stagedBin = path.join(staging, "bin");
+  mkdirSync(stagedBin, { recursive: true });
 
   try {
     for (const source of SOURCES) {
@@ -669,9 +688,14 @@ async function main(): Promise<void> {
       assertDigest(source.sha256, sha256Of(bytes), source.name);
 
       if (source.archive === "raw") {
-        // A bare .exe, not an archive: the single members entry names it.
-        const destination = Object.values(source.members)[0]!;
-        writeFileSync(path.join(binDir, destination), bytes);
+        // A bare .exe, not an archive. There is exactly one member and its
+        // destination is the only thing that matters, so this path never
+        // consults destinationFor.
+        const destination = Object.values(source.members)[0];
+        if (destination === undefined) {
+          throw new Error(`${source.name}: a raw source needs exactly one members entry.`);
+        }
+        writeFileSync(path.join(stagedBin, destination), bytes);
         console.log(`${source.name}: ${destination} (${formatBytes(bytes.byteLength)})`);
         continue;
       }
@@ -683,6 +707,9 @@ async function main(): Promise<void> {
       const extractRoot = path.join(archiveDir, "unpacked");
       mkdirSync(extractRoot, { recursive: true });
       const members = extract(archivePath, extractRoot);
+      if (members.length === 0) {
+        throw new Error(`${source.name}: the archive extracted no files at all.`);
+      }
 
       const absent = missingMembers(source, members);
       if (absent.length > 0) {
@@ -694,18 +721,27 @@ async function main(): Promise<void> {
 
       for (const member of members) {
         const destination = destinationFor(source, member);
-        if (!destination) continue;
-        writeFileSync(path.join(binDir, destination), readFileSync(path.join(extractRoot, member)));
+        if (destination === null) continue;
+        writeFileSync(path.join(stagedBin, destination), readFileSync(path.join(extractRoot, member)));
         console.log(`${source.name}: ${destination}`);
       }
     }
+
+    // Only now is the previous bundle replaced. Everything above wrote into a
+    // temp directory, so a digest mismatch or a failed extraction leaves the
+    // last known-good bundle exactly as it was - a partially vendored bin/
+    // would otherwise be packaged by electron-builder without complaint, and
+    // the first thing to notice would be a user's conversion failing.
+    rmSync(bundleRoot, { recursive: true, force: true });
+    mkdirSync(bundleRoot, { recursive: true });
+    cpSync(stagedBin, binDir, { recursive: true });
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
 
   const files = readdirSync(binDir);
   const total = files.reduce((sum, file) => sum + statSync(path.join(binDir, file)).size, 0);
-  console.log(`\nVendored ${files.length} executables, ${formatBytes(total)} total.`);
+  console.log(`\nVendored ${files.length} files, ${formatBytes(total)} total.`);
 }
 
 // The same identity check scripts/vendor-binaries.ts uses. A substring test

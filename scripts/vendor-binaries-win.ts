@@ -1,6 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -287,10 +297,9 @@ async function main(): Promise<void> {
   const bundleRoot = path.join(repoRoot, "resources", "bin", "win32-x64");
   const binDir = path.join(bundleRoot, "bin");
 
-  rmSync(bundleRoot, { recursive: true, force: true });
-  mkdirSync(binDir, { recursive: true });
-
   const staging = mkdtempSync(path.join(tmpdir(), "converter-vendor-win-"));
+  const stagedBin = path.join(staging, "bin");
+  mkdirSync(stagedBin, { recursive: true });
 
   try {
     for (const source of SOURCES) {
@@ -305,7 +314,7 @@ async function main(): Promise<void> {
         if (destination === undefined) {
           throw new Error(`${source.name}: a raw source needs exactly one members entry.`);
         }
-        writeFileSync(path.join(binDir, destination), bytes);
+        writeFileSync(path.join(stagedBin, destination), bytes);
         console.log(`${source.name}: ${destination} (${formatBytes(bytes.byteLength)})`);
         continue;
       }
@@ -317,6 +326,9 @@ async function main(): Promise<void> {
       const extractRoot = path.join(archiveDir, "unpacked");
       mkdirSync(extractRoot, { recursive: true });
       const members = extract(archivePath, extractRoot);
+      if (members.length === 0) {
+        throw new Error(`${source.name}: the archive extracted no files at all.`);
+      }
 
       const absent = missingMembers(source, members);
       if (absent.length > 0) {
@@ -329,10 +341,19 @@ async function main(): Promise<void> {
       for (const member of members) {
         const destination = destinationFor(source, member);
         if (destination === null) continue;
-        writeFileSync(path.join(binDir, destination), readFileSync(path.join(extractRoot, member)));
+        writeFileSync(path.join(stagedBin, destination), readFileSync(path.join(extractRoot, member)));
         console.log(`${source.name}: ${destination}`);
       }
     }
+
+    // Only now is the previous bundle replaced. Everything above wrote into a
+    // temp directory, so a digest mismatch or a failed extraction leaves the
+    // last known-good bundle exactly as it was - a partially vendored bin/
+    // would otherwise be packaged by electron-builder without complaint, and
+    // the first thing to notice would be a user's conversion failing.
+    rmSync(bundleRoot, { recursive: true, force: true });
+    mkdirSync(bundleRoot, { recursive: true });
+    cpSync(stagedBin, binDir, { recursive: true });
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }

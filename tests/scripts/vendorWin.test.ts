@@ -119,6 +119,15 @@ describe("SOURCES", () => {
     }
   });
 
+  test("a raw source declares exactly one member", () => {
+    // main()'s raw branch takes Object.values(members)[0] as the destination.
+    // More than one entry would silently drop the rest; zero would throw only
+    // once someone ran the vendoring on an actual Windows machine.
+    for (const source of SOURCES.filter((candidate) => candidate.archive === "raw")) {
+      expect(Object.keys(source.members), `${source.name} is raw`).toHaveLength(1);
+    }
+  });
+
   test("resvg stays pinned to a release that ships a Windows asset", () => {
     // resvg v0.48.0 and v0.48.1 publish macOS assets ONLY. v0.47.0 is the
     // most recent release with resvg-win64.zip. Bumping this forward without
