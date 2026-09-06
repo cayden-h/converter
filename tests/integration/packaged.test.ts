@@ -42,6 +42,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { createEngine } from "../../src/main/engine";
+import { KNOWN_TOOLS } from "../../src/main/engine/toolchain";
 import { ensureCsvFixture, ensurePngFixtureWith } from "../fixtures/make-fixtures";
 
 // electron-builder writes each platform's unpacked build to its own
@@ -81,7 +82,11 @@ describe.skipIf(!appExists)("packaged app: real conversions from bundled binarie
     // The whole point of this task: a tool resolving to /opt/homebrew here
     // would mean the packaged app depends on Homebrew being installed on the
     // machine that runs it, which the bundling work is supposed to prevent.
-    expect(resolved.length).toBeGreaterThan(0);
+    // Assert the EXACT set, not merely that something resolved. A bundle
+    // missing three of its ten executables still yields a non-empty
+    // toolchain, every conversion block below skipIf's itself away, and this
+    // test goes green while the shipped installer cannot convert video.
+    expect(Object.keys(engine.toolchain).sort()).toEqual(Object.keys(KNOWN_TOOLS).sort());
     for (const [tool, resolvedPath] of resolved) {
       expect(resolvedPath!.startsWith(APP_PATH), `${tool} resolved to ${resolvedPath}, outside the app bundle`).toBe(
         true,
