@@ -90,7 +90,35 @@ export function createExecFile(
 export function toCommandMap(toolchain: Toolchain): CommandMap {
   const commands: CommandMap = {};
   for (const [name, resolved] of Object.entries(toolchain)) {
-    if (resolved) commands[KNOWN_TOOLS[name as ToolName].binary] = resolved;
+    if (!resolved) continue;
+    const spec = KNOWN_TOOLS[name as ToolName];
+    commands[spec.binary] = resolved;
+    // A suite's siblings live beside the primary; without this, pdftotext
+    // resolves to nothing while pdftoppm works.
+    for (const sibling of spec.binaries) {
+      if (sibling === spec.binary) continue;
+      commands[sibling] = path.join(path.dirname(resolved), sibling);
+    }
   }
   return commands;
+}
+
+/**
+ * ffmpeg's lifted converter takes node's real argument order,
+ * (cmd, args, options, callback), rather than ExecFileFn's
+ * (cmd, args, callback, options). Upstream's own comment explains why: node
+ * ignores an options object placed after the callback.
+ *
+ * This adapts our wrapper to that shape so ffmpeg still gets absolute-path
+ * resolution, shell stripping and the maxBuffer default.
+ */
+export type FfmpegExecFile = (
+  cmd: string,
+  args: string[],
+  options: object,
+  callback: (err: Error | null, stdout: string, stderr: string) => void,
+) => unknown;
+
+export function toFfmpegExecFile(execFile: ExecFileFn): FfmpegExecFile {
+  return (cmd, args, options, callback) => execFile(cmd, args, callback, options as never);
 }

@@ -10,6 +10,16 @@ export interface ConverterProperties {
 export interface ConverterEntry {
   /** The tool this converter shells out to. */
   tool: ToolName;
+  /**
+   * Higher wins when more than one converter claims a pair.
+   *
+   * A function receives the NORMALIZED input format so a converter can rank
+   * itself by medium. That is necessary rather than decorative: ImageMagick and
+   * ffmpeg contest every common still format, and upstream's category keys
+   * cannot separate them (ImageMagick files mp4 under "images"; ffmpeg files
+   * everything under "muxer").
+   */
+  priority: number | ((input: string) => number);
   properties: ConverterProperties;
   convert: (
     filePath: string,
@@ -62,6 +72,10 @@ function flattenOutputs(formats: Record<string, string[]>): Set<string> {
   return out;
 }
 
+function priorityOf(entry: ConverterEntry, input: string): number {
+  return typeof entry.priority === "function" ? entry.priority(input) : entry.priority;
+}
+
 export function buildRegistry(
   converters: Record<string, ConverterEntry>,
   toolchain: Toolchain,
@@ -99,10 +113,18 @@ export function buildRegistry(
       // Normalize the requested output the same way the `to` set was built, so
       // that both "jpg" and "jpeg" from a caller route to the same converter.
       const to = normalizeOutputFiletype(output);
-      for (const entry of index) {
-        if (entry.from.has(from) && entry.to.has(to)) return entry.converter;
+      const candidates = index.filter((entry) => entry.from.has(from) && entry.to.has(to));
+      if (candidates.length === 0) return null;
+      let best = candidates[0]!;
+      let bestPriority = priorityOf(best.converter, from);
+      for (const candidate of candidates.slice(1)) {
+        const priority = priorityOf(candidate.converter, from);
+        if (priority > bestPriority) {
+          best = candidate;
+          bestPriority = priority;
+        }
       }
-      return null;
+      return best.converter;
     },
 
     missingTools() {

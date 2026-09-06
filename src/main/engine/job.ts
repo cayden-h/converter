@@ -47,6 +47,17 @@ function outputWasWritten(outputPath: string): boolean {
   return existsSync(outputPath) && statSync(outputPath).size > 0;
 }
 
+/**
+ * ffmpeg advertises compound targets like "av1.mp4" where the prefix selects a
+ * codec and the suffix is the container. The file must be named for the
+ * container alone, while the converter still receives the full string.
+ */
+function outputExtension(output: string): string {
+  const normalized = normalizeOutputFiletype(output);
+  const lastDot = normalized.lastIndexOf(".");
+  return lastDot === -1 ? normalized : normalized.slice(lastDot + 1);
+}
+
 export class JobRunner extends EventEmitter {
   constructor(
     private readonly registry: Registry,
@@ -109,7 +120,7 @@ export class JobRunner extends EventEmitter {
       return { path: item.path, ok: false, error };
     }
 
-    const extension = normalizeOutputFiletype(item.output);
+    const extension = outputExtension(item.output);
     const base = path.basename(item.path, path.extname(item.path));
     const outputPath = this.claimOutputPath(
       this.options.outputDirFor(item.path),

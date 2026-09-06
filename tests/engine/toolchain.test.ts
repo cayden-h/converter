@@ -134,3 +134,45 @@ describe("isSupportedPlatform", () => {
     expect(isSupportedPlatform("Darwin")).toBe(false);
   });
 });
+
+describe("multi-binary tool suites", () => {
+  test("resolves a named binary from a suite", () => {
+    const result = resolveTool("poppler", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/pdftoppm",
+      binary: "pdftoppm",
+    });
+    expect(result).toBe("/opt/homebrew/bin/pdftoppm");
+  });
+
+  test("resolves a sibling binary from the same suite directory", () => {
+    // pdftotext lives beside pdftoppm. One entry must cover both, or the
+    // platform paths get duplicated per binary.
+    const result = resolveTool("poppler", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/pdftotext",
+      binary: "pdftotext",
+    });
+    expect(result).toBe("/opt/homebrew/bin/pdftotext");
+  });
+
+  test("defaults to the suite's primary binary when none is named", () => {
+    const result = resolveTool("poppler", {
+      platform: "darwin",
+      arch: "arm64",
+      bundleDir: "/bundle/bin",
+      exists: (p) => p === "/opt/homebrew/bin/pdftoppm",
+    });
+    expect(result).toBe("/opt/homebrew/bin/pdftoppm");
+  });
+
+  test("every suite lists its primary binary first", () => {
+    for (const [name, spec] of Object.entries(KNOWN_TOOLS)) {
+      expect(spec.binaries[0], `${name} must list a primary binary first`).toBe(spec.binary);
+    }
+  });
+});

@@ -17,3 +17,38 @@ export function ensurePngFixture(magickPath: string): string {
   }
   return target;
 }
+
+/** A 1-second video WITH an audio track, generated with ffmpeg itself. */
+export function ensureVideoFixture(ffmpegPath: string): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.mp4");
+  if (!existsSync(target)) {
+    execFileSync(ffmpegPath, [
+      "-y",
+      "-f", "lavfi", "-i", "testsrc=duration=1:size=64x64:rate=10",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+      "-pix_fmt", "yuv420p", "-shortest", target,
+    ]);
+  }
+  return target;
+}
+
+/** A one-page PDF, generated with ImageMagick. */
+export function ensurePdfFixture(magickPath: string): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.pdf");
+  if (!existsSync(target)) {
+    execFileSync(magickPath, ["-size", "120x80", "xc:white", target]);
+  }
+  return target;
+}
+
+/** A small HEIC image. HEIC to JPG is the spec's headline conversion. */
+export function ensureHeicFixture(magickPath: string): string {
+  mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, "sample.heic");
+  if (!existsSync(target)) {
+    execFileSync(magickPath, ["-size", "64x64", "xc:navy", target]);
+  }
+  return target;
+}
