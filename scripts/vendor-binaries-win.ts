@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -342,11 +342,12 @@ async function main(): Promise<void> {
   console.log(`\nVendored ${files.length} files, ${formatBytes(total)} total.`);
 }
 
-// `noUncheckedIndexedAccess` is on, so process.argv[1] is `string |
-// undefined`. Bind it to a local first: narrowing inside a `const isMain`
-// expression does not carry over to a later `if`.
-const entry = process.argv[1];
-if (entry !== undefined && entry.includes("vendor-binaries-win")) {
+// The same identity check scripts/vendor-binaries.ts uses. A substring test
+// on argv[1] would also fire when the script is reached through any wrapper
+// path that happens to contain its name; comparing resolved paths will not.
+const isMain =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+if (isMain) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
