@@ -7,10 +7,18 @@ on:
 
 permissions:
   contents: write
+  # The SignPath connector reads this run's job metadata and downloads the
+  # uploaded artifact through the GitHub API.
+  actions: read
 
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      # Mapped to env so the signing steps can be gated on its presence: a
+      # repository without SignPath configured, or a fork, publishes unsigned
+      # exactly as before rather than failing.
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,37 +40,108 @@ jobs:
 
       - run: npm test
 
-      # Package unpacked and test it BEFORE anything is published. Publishing
-      # an installer whose bundled tools were never exercised is the failure
-      # this ordering prevents.
+      # --x64 is required. Without it electron-builder targets the host arch
+      # and writes release/win-arm64-unpacked, which the packaged test does
+      # not look for - it would skip instead of fail, and the skip reads as
+      # a pass.
       - name: Package (unpacked)
         run: npx electron-builder --win --dir --x64
 
+      # Proves the bundle is self-contained BEFORE anything is published:
+      # every resolved tool path must be inside the packaged tree, and real
+      # conversions must produce output verified by magic bytes.
       - name: Packaged app test
         run: npx vitest run tests/integration/packaged.test.ts
         env:
           EXPECT_PACKAGED_APP: "1"
 
-      # Publish ONLY from a tag. electron-builder derives the release tag from
-      # package.json's version, so --publish always on a manual dispatch would
-      # upload assets into whatever release already carries that version and
-      # overwrite a shipped artifact with a build from an arbitrary commit.
-      - name: Build and publish the installers
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: npx electron-builder --win --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build the installers without publishing
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      # Build only, never publish. Publishing is a separate step at the end
+      # for two reasons: the installers must be signed BETWEEN building and
+      # publishing, and electron-builder's own publisher created a second,
+      # blockmap-only draft release for every tag it published.
+      - name: Build the installers
         run: npx electron-builder --win --publish never
 
-      # A manual dispatch deliberately does not publish, so the artifact store
-      # is the only way to reach the .exe files it builds.
-      - name: Upload artifacts
+      # SignPath fetches what it signs from a GitHub Actions artifact, so this
+      # upload is a required input to signing rather than a convenience. It
+      # also remains the only way to reach the binaries from a manual dispatch.
+      - name: Upload the unsigned installers
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-unsigned
+          path: |
+            release/Converter-*-setup.exe
+            release/Converter-*-portable.exe
+          if-no-files-found: error
+
+      # Skipped entirely until SIGNPATH_API_TOKEN exists. The three non-secret
+      # identifiers come from repository variables; if the token is set and
+      # they are not, this fails loudly rather than publishing unsigned.
+      - name: Sign the installers
+        id: signing
+        if: env.SIGNPATH_API_TOKEN != ''
+        # Pinned to a full commit SHA (v2.3) rather than a moving tag, unlike
+        # the actions/* refs above: this is the one third-party action here,
+        # and it receives the signing token.
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: release/signed
+
+      - name: Replace the installers with their signed copies
+        if: steps.signing.outcome == 'success'
+        shell: bash
+        run: cp release/signed/*.exe release/
+
+      # Signing that silently did not happen is the failure this guards. The
+      # step above cannot tell a signed binary from an unsigned one, so assert
+      # the signature Windows itself would check, and fail the release rather
+      # than publish something only believed to be signed.
+      - name: Verify the signatures
+        if: steps.signing.outcome == 'success'
+        shell: pwsh
+        run: |
+          $bad = @()
+          Get-ChildItem release/Converter-*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            Write-Host "$($_.Name): $($sig.Status) - $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { $bad += $_.Name }
+          }
+          if ($bad.Count -gt 0) { throw "not validly signed: $($bad -join ', ')" }
+
+      - name: Upload the final installers
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers
           path: |
-            release/*setup.exe
-            release/*portable.exe
+            release/Converter-*-setup.exe
+            release/Converter-*-portable.exe
+          if-no-files-found: error
+
+      # Only the two installers are published. electron-builder also emits
+      # latest.yml and .blockmap files, which describe the UNSIGNED bytes and
+      # are stale the moment signing rewrites them. Nothing consumes them
+      # today since no auto-updater is wired up, and publishing hashes that do
+      # not match the shipped binaries would be a trap for whoever adds one.
+      #
+      # Draft, so the release is reviewed and tested before anyone can
+      # download it.
+      - name: Publish the draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Windows installers for $GITHUB_REF_NAME. The macOS dmg is built locally and uploaded separately." \
+            release/Converter-*-setup.exe \
+            release/Converter-*-portable.exe
