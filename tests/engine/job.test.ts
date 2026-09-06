@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { JobRunner } from "../../src/main/engine/job";
 import { buildRegistry } from "../../src/main/engine/registry";
@@ -28,7 +29,11 @@ describe("JobRunner", () => {
     });
     const results = await runner.run([{ path: "/in/a.png", output: "jpg" }]);
     expect(results[0]?.ok).toBe(true);
-    expect(results[0]?.outputPath).toBe("/out/a.jpg");
+    // Built with path.join, not written as a literal: the runner joins the
+    // output directory natively, so this is "\out\a.jpg" on Windows. A
+    // forward-slash literal here passed on macOS and failed the first time
+    // CI ran on Windows.
+    expect(results[0]?.outputPath).toBe(path.join("/out", "a.jpg"));
   });
 
   test("a failing file does not stop the others", async () => {
@@ -254,7 +259,7 @@ describe("JobRunner", () => {
     });
     const results = await runner.run([{ path: "/in/clip.mov", output: "av1.mp4" }]);
     expect(results[0]?.ok, results[0]?.error).toBe(true);
-    expect(results[0]?.outputPath).toBe("/out/clip.mp4");
+    expect(results[0]?.outputPath).toBe(path.join("/out", "clip.mp4"));
   });
 
   test("passes the full compound format to the converter, not just the container", async () => {
