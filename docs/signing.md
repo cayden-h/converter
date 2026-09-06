@@ -6,7 +6,15 @@ The Windows installers are unsigned today, so SmartScreen warns on first run.
 ## Why SignPath
 
 SignPath Foundation signs open-source projects for free.
-Converter qualifies: AGPL-3.0-or-later is OSI-approved with no commercial dual-licensing, the repository is public, releases are built in CI, and every bundled tool is itself open source.
+Converter meets some of the criteria: AGPL-3.0-or-later is OSI-approved with no commercial dual-licensing, releases are built in CI, and every bundled tool is itself open source.
+
+Two criteria are NOT met yet, and applying before they are will get the application declined.
+
+**The repository is private.** SignPath Foundation requires a publicly accessible repository. `cayden-h/converter` is private, so the application cannot be assessed at all.
+
+**There is no reputation to show.** The application form has a required "Reputation" field asking for links or evidence that the project is widely used or trusted - media coverage, download statistics, GitHub insights, community discussion. The repository was created on 2026-09-04 and currently has no stars, forks or watchers. There is nothing to put in that field.
+
+Make the repository public and let the project accumulate some real usage first. The application is a human review, so a premature one is worth avoiding.
 
 The trade to understand before applying: the certificate belongs to SignPath Foundation, not to you.
 Windows will show the verified publisher as **SignPath Foundation**, not your name or Converter's.
@@ -16,11 +24,17 @@ Nothing in the workflow depends on which one you pick, but the steps below are S
 
 ## Enabling it
 
-1. Apply at <https://signpath.org/apply>. They review the project and its build setup.
-2. In SignPath, create a project and an artifact configuration describing the two files to sign, `Converter-<version>-setup.exe` and `Converter-<version>-portable.exe`, then a signing policy for releases.
-3. Add one repository **secret**:
+1. Make the repository public, and be able to answer the "Reputation" field honestly. See the section above.
+2. Apply at <https://signpath.org/apply>. They review the project and its build setup, and the form ends with a reCAPTCHA, so it has to be submitted by hand.
+
+   Required fields: Project Name, Repository URL, Homepage URL, Tagline, Description, Reputation, First Name, Last Name, Email, Primary Discovery Channel.
+   Optional: Download URL, Privacy Policy URL, Wikipedia URL, Maintainer Type, Build System, Company Name.
+
+   Note the Download URL rule: that page must state the project uses SignPath Foundation for code signing, so the README or the release page needs a line saying so before you submit it.
+3. In SignPath, create a project and an artifact configuration describing the two files to sign, `Converter-<version>-setup.exe` and `Converter-<version>-portable.exe`, then a signing policy for releases.
+4. Add one repository **secret**:
    - `SIGNPATH_API_TOKEN`
-4. Add four repository **variables** (not secrets - none of these are sensitive):
+5. Add four repository **variables** (not secrets - none of these are sensitive):
    - `SIGNPATH_ORGANIZATION_ID`
    - `SIGNPATH_PROJECT_SLUG`
    - `SIGNPATH_SIGNING_POLICY_SLUG`
@@ -29,7 +43,7 @@ Nothing in the workflow depends on which one you pick, but the steps below are S
 The presence of `SIGNPATH_API_TOKEN` is what turns signing on.
 If the token is set but a variable is missing, the run fails rather than quietly publishing unsigned.
 
-5. Update `README.md`: remove the SmartScreen paragraph once a signed release has actually been verified on a real machine, not before.
+6. Update `README.md`: remove the SmartScreen paragraph once a signed release has actually been verified on a real machine, not before.
 
 ## How the workflow handles it
 
