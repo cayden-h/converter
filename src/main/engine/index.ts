@@ -151,15 +151,6 @@ export function createEngine(bundleDir: string): Engine {
     bundleDir,
   });
 
-  // ImageMagick loads format coders as separate .so modules from a path
-  // compiled in at build time, which points into Homebrew. Without these the
-  // bundled binary runs, reports its version, and knows zero formats.
-  const bundledMagick = toolchain.imagemagick;
-  if (bundledMagick?.startsWith(bundleDir)) {
-    const root = path.join(bundleDir, `${process.platform}-${process.arch}`);
-    process.env.MAGICK_CODER_MODULE_PATH = path.join(root, "lib/ImageMagick/modules-Q16HDRI/coders");
-    process.env.MAGICK_CONFIGURE_PATH = path.join(root, "etc/ImageMagick-7");
-  }
 
   const registry = buildRegistry(CONVERTERS, toolchain);
 

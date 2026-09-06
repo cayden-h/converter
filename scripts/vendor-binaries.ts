@@ -217,12 +217,22 @@ function main(): void {
     mkdirSync(path.dirname(coderDestDir), { recursive: true });
     mkdirSync(path.dirname(configureDestDir), { recursive: true });
 
-    cpSync(coderPath, coderDestDir, { recursive: true });
-    cpSync(configurePath, configureDestDir, { recursive: true });
+    // A non-modular ImageMagick (built --without-modules) compiles every coder
+    // into libMagickCore and ships no coders directory at all, even though it
+    // still reports a CODER_PATH. Copying is therefore conditional; the
+    // configuration XML exists either way.
+    if (existsSync(coderPath)) {
+      cpSync(coderPath, coderDestDir, { recursive: true });
+    }
+    if (existsSync(configurePath)) {
+      cpSync(configurePath, configureDestDir, { recursive: true });
+    }
 
-    const coderFiles = readdirSync(coderDestDir)
-      .filter((name) => name.endsWith(".so"))
-      .map((name) => path.join(coderDestDir, name));
+    const coderFiles = existsSync(coderDestDir)
+      ? readdirSync(coderDestDir)
+          .filter((name) => name.endsWith(".so"))
+          .map((name) => path.join(coderDestDir, name))
+      : [];
     for (const coderFile of coderFiles) {
       relocateCoderModule(coderFile);
     }
