@@ -21,9 +21,9 @@
  *
  * On WINDOWS the main caveat above mostly lifts, and the note is stronger
  * rather than weaker. This suite runs on a GitHub `windows-latest` runner,
- * a fresh machine where ImageMagick, ffmpeg, poppler, resvg, dasel and
- * potrace were never installed. A pass there is real evidence that the
- * bundle is self-contained.
+ * a machine where ffmpeg, pandoc, poppler, resvg, dasel and potrace were
+ * never installed. A pass there is real evidence that the bundle is
+ * self-contained.
  *
  * Two honest limits remain. ImageMagick IS preinstalled on that image
  * (7.1.2-25 on windows-2025, checked against the runner-images manifest),
