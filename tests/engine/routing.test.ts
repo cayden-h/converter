@@ -1,10 +1,33 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { createEngine, CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
+import { CONVERTERS, MEDIA_INPUTS } from "../../src/main/engine/index";
+import { buildRegistry } from "../../src/main/engine/registry";
+import { KNOWN_TOOLS, type ToolName, type Toolchain } from "../../src/main/engine/toolchain";
 import { properties as imagemagick } from "../../src/main/engine/converters/imagemagick";
 import { properties as ffmpeg } from "../../src/main/engine/converters/ffmpeg";
 import { mediumOf } from "../../src/main/engine/media";
+
+/**
+ * A toolchain in which every known tool is present.
+ *
+ * Routing is pure logic - which converter wins for a from/to pair - and must
+ * not depend on what happens to be installed on the machine running the
+ * tests. This test previously built its engine with
+ * createEngine("/nonexistent-bundle-dir"), which found no bundled tool and
+ * fell back to ToolSpec.systemPaths. On a developer Mac those resolve to real
+ * Homebrew binaries, so the registry was fully populated and every assertion
+ * passed; on a clean Windows runner nothing resolved, the registry was empty,
+ * and all 23 assertions failed. The suite was quietly asserting that Homebrew
+ * was installed.
+ */
+function completeToolchain(): Toolchain {
+  const toolchain: Toolchain = {};
+  for (const name of Object.keys(KNOWN_TOOLS) as ToolName[]) {
+    toolchain[name] = `/fake/bin/${name}`;
+  }
+  return toolchain;
+}
 
 /** Recursively yields .ts/.tsx files under `dir`, skipping node_modules/out. */
 function* walk(dir: string): Generator<string> {
@@ -51,7 +74,7 @@ describe("MEDIA_INPUTS data integrity", () => {
 });
 
 describe("real routing", () => {
-  const engine = createEngine("/nonexistent-bundle-dir");
+  const registry = buildRegistry(CONVERTERS, completeToolchain());
 
   test.each([
     ["mp4", "gif", "ffmpeg"],
@@ -72,7 +95,7 @@ describe("real routing", () => {
     ["json", "yaml", "dasel"],
     ["epub", "html", "pandoc"],
   ])("routes %s to %s via %s", (from, to, expected) => {
-    expect(engine.registry.converterFor(from, to)?.name).toBe(expected);
+    expect(registry.converterFor(from, to)?.name).toBe(expected);
   });
 
   test("every registered converter declares a priority", () => {
@@ -86,9 +109,8 @@ describe("real routing", () => {
     // Satisfying the ratio required hiding ~140 formats, which reached past the
     // junk into real ones - mxf, dnxhd, aifc and y4m were all silently lost.
     // Assert the property directly instead of a count.
-    const engine = createEngine("/nonexistent-bundle-dir");
     const offered = new Set(
-      engine.registry.groupedOutputsFor("mp4").flatMap((g) => g.formats),
+      registry.groupedOutputsFor("mp4").flatMap((g) => g.formats),
     );
     const mustOffer = ["mp4", "mkv", "webm", "mov", "gif", "mxf", "y4m", "mp3", "wav", "flac"];
     const missing = mustOffer.filter((f) => !offered.has(f));
@@ -96,9 +118,8 @@ describe("real routing", () => {
   });
 
   test("offers no pseudo-format or codec-only name", () => {
-    const engine = createEngine("/nonexistent-bundle-dir");
     const offered = new Set(
-      engine.registry.groupedOutputsFor("png").flatMap((g) => g.formats),
+      registry.groupedOutputsFor("png").flatMap((g) => g.formats),
     );
     const mustHide = ["null", "clipboard", "histogram", "info", "mask", "264", "hevc", "png8"];
     const leaked = mustHide.filter((f) => offered.has(f));
@@ -129,11 +150,17 @@ describe("portability rule 1", () => {
     // Portability rule 1. A second home for these paths means a Windows port
     // silently misses one. This caught formatsPanel.ts once already.
     const offenders: string[] = [];
-    const roots = ["src/main", "src/renderer", "src/preload", "src/shared"];
+    // Built with path.join rather than written as literals: readdirSync does
+    // accept forward slashes on Windows, but joining keeps the walk rooted in
+    // the host's own separator so nothing here depends on that leniency.
+    const roots = ["main", "renderer", "preload", "shared"].map((dir) => path.join("src", dir));
     const pattern = /\/opt\/homebrew|\/usr\/local\/bin|\/Applications\/|Program Files|\.cargo\/bin/;
     for (const root of roots) {
       for (const file of walk(root)) {
-        if (file.endsWith("engine/toolchain.ts")) continue;
+        // path.join gives backslashes on Windows, so a POSIX-shaped endsWith
+        // check silently fails there and toolchain.ts reports itself as an
+        // offender. Normalize before comparing.
+        if (file.split(path.sep).join("/").endsWith("engine/toolchain.ts")) continue;
         if (pattern.test(readFileSync(file, "utf8"))) offenders.push(file);
       }
     }
